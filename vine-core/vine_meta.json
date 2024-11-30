@@ -1,0 +1,1 @@
+{"table_name":"new_table","fields":[{"id":1,"name":"id","data_type":"i32","is_required":true},{"id":2,"name":"name","data_type":"String","is_required":true}]}
