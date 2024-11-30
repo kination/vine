@@ -1,0 +1,29 @@
+# sbt
+target/
+project/target/
+project/project/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Eclipse
+.classpath
+.project
+.settings/
+
+# Other IDEs
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Compiled class files
+*.class
+
+# Dependency directories
+lib/
+

@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use crate::Metadata;
 
+// TODO: "data" should be dynamic Vectord
 pub fn write_data<P: AsRef<Path>>(path: P, data: &Vec<(i32, &str)>) -> parquet::errors::Result<()> {
     let file = File::create(path)?;
     let meta_str = read_to_string("vine_meta.json").expect("Failed to read vine_meta.json");
@@ -25,11 +26,11 @@ pub fn write_data<P: AsRef<Path>>(path: P, data: &Vec<(i32, &str)>) -> parquet::
 
     let mut schema_str = String::from("message schema {\n");
     for field in meta_fields {
+        
         // TODO: Apply "required" only when "is_required" are true
         let field_type = match field.data_type.as_str() {
             "i32" => "REQUIRED INT32",
             "String" => "REQUIRED BINARY",
-            // TODO: Add more type mappings as needed
             _ => continue,
         };
 
@@ -55,6 +56,24 @@ pub fn write_data<P: AsRef<Path>>(path: P, data: &Vec<(i32, &str)>) -> parquet::
     for row in data {
         int32_values.push(row.0);
         byte_array_values.push(row.1.into());
+        // for field in &metadata.fields {
+        //     match field.data_type.as_str() {
+        //         "String" => {
+        //             byte_array_values.push(ByteArray::from(row.1.as_str().unwrap().as_bytes().to_vec()));
+        //         },
+        //         "i32" => {
+        //             int32_values.push(row.1.as_i64().unwrap() as i32); // Assuming row.1 is a serde_json::Value
+        //         },
+        //         "bool" => {
+        //             let bool_value = row.1.as_bool().unwrap();
+        //             // Handle the bool value as needed, e.g., store it in a separate vector or process it
+        //             // For example, you might want to store it in a Vec<bool> if needed
+        //         },
+        //         // Handle other types as needed
+        //         _ => continue,
+        //     }
+        // }
+
     }
 
     let mut row_group_writer = writer.next_row_group().unwrap();
