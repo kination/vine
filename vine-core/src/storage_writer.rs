@@ -8,10 +8,10 @@ use parquet::{
 use parquet::column::writer::{ColumnWriter};
 use parquet::record::{Row, RowAccessor};
 use parquet::data_type::{ByteArray, ByteArrayType, Int32Type, Int64Type};
-use serde_json::from_str; 
+use serde_json::from_str;
+use chrono::Local;
 
-// use std::fs;
-use std::fs::{File, read_to_string};
+use std::fs::{self, File, read_to_string};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -99,7 +99,20 @@ pub fn write_data<P: AsRef<Path>>(path: P, data: &Vec<(i32, &str)>) -> parquet::
 }
 
 pub fn write_dynamic_data<P: AsRef<Path>>(path: P, data: &Vec<&str>) -> parquet::errors::Result<()> {
-    let file = File::create(path)?;
+
+    let now = Local::now();
+    let date_dir = now.format("%Y-%m-%d").to_string();
+    let time_str = now.format("%H%M%S").to_string();
+
+    let base_path = path.as_ref();
+    let date_path = base_path.join(&date_dir);
+
+    fs::create_dir_all(&date_path)?;
+    
+    let file_name = format!("data_{}.parquet", time_str);
+    let file_path = date_path.join(file_name);
+    let file = File::create(file_path)?;
+
     let meta_str = read_to_string("vine_meta.json").expect("Failed to read vine_meta.json");
     let metadata: Metadata = from_str(&meta_str).expect("Failed to deserialize metadata");
     let meta_fields = metadata.fields.clone();

@@ -2,13 +2,13 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{self, Write};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Metadata {
     pub table_name: String,
     pub fields: Vec<MetadataField>
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct MetadataField {
     pub id: i32,
     pub name: String,
