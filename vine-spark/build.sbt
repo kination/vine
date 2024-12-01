@@ -29,8 +29,16 @@ version := "0.0.1"
 libraryDependencies ++= Seq(
     "org.apache.spark" %% "spark-sql" % "3.4.0" % Provided,
     "org.apache.parquet" % "parquet-avro" % "1.12.0",
-    "com.fasterxml.jackson.module" %% "jackson-module-scala" % "2.13.0"
+//    "com.fasterxml.jackson.module" %% "jackson-module-scala" % "2.13.0"
 )
+
+assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false)
+assemblyMergeStrategy in assembly := {
+    case PathList("META-INF", xs @_*) => MergeStrategy.discard
+    case x => MergeStrategy.first
+}
+mainClass in assembly := Some("io.kination.vine.VineDataSource")
+
 // Here, `libraryDependencies` is a set of dependencies, and by using `+=`,
 // we're adding the scala-parser-combinators dependency to the set of dependencies
 // that sbt will go and fetch when it starts up.

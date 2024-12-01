@@ -1,4 +1,7 @@
-import org.apache.spark.sql.connector.write.{BatchWrite, DataWriterFactory, LogicalWriteInfo, PhysicalWriteInfo, WriteBuilder, WriterCommitMessage}
+package io.kination.vine
+
+import org.apache.spark.sql.connector.write._
+
 
 class VineDataSourceWriter(info: LogicalWriteInfo) extends WriteBuilder with BatchWrite {
 

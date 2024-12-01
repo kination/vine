@@ -27,3 +27,7 @@ project/project/
 # Dependency directories
 lib/
 
+#others
+.bloop/
+.bsp/
+
