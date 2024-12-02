@@ -27,7 +27,7 @@ class VineDataSource extends TableProvider with SupportsRead with SupportsWrite 
   }
 
   override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {
-    new VineDataSourceWriter(info)
+    new VineDataSourceWriteBuilder(info)
   }
 
   override def name(): String = ???

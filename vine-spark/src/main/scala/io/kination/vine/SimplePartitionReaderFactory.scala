@@ -13,7 +13,8 @@ class SimplePartitionReaderFactory extends PartitionReaderFactory {
 
 class SimplePartitionReader extends PartitionReader[InternalRow] {
   // TODO: put actual path from configs
-  private val data = VineJNI.readDataFromVine("vine-test/result").split("\n").iterator
+//  private val data = VineJNI.readDataFromVine("vine-test/result").split("\n").iterator
+  private val data = VineModule.readDataFromVine("vine-test/result").split("\n").iterator
 
   override def next(): Boolean = data.hasNext
 

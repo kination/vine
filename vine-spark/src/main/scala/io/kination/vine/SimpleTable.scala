@@ -1,12 +1,14 @@
 package io.kination.vine
 
-import org.apache.spark.sql.connector.catalog.{SupportsWrite, Table, TableCapability}
+import org.apache.spark.sql.connector.catalog.{SupportsRead, SupportsWrite, Table, TableCapability}
+import org.apache.spark.sql.connector.read.ScanBuilder
 import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder}
 import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import java.util
 
-class SimpleTable(schema: StructType) extends Table with SupportsWrite {
+class SimpleTable(schema: StructType) extends Table with SupportsRead with SupportsWrite {
 
   override def name(): String = "SimpleTable"
 
@@ -18,6 +20,13 @@ class SimpleTable(schema: StructType) extends Table with SupportsWrite {
 
 
   override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {
-    new MyDataSourceWriteBuilder(info)
+//    new MyDataSourceWriteBuilder(info)
+    println("call VineDataSourceWriter from simpletable")
+    new VineDataSourceWriteBuilder(info)
+  }
+
+  override def newScanBuilder(options: CaseInsensitiveStringMap): ScanBuilder = {
+    println("call VineDataSourceReader from simpletable")
+    new VineDataSourceReader(options)
   }
 }
