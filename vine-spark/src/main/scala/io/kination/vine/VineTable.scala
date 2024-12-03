@@ -8,7 +8,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import java.util
 
-class SimpleTable(schema: StructType) extends Table with SupportsRead with SupportsWrite {
+class VineTable(schema: StructType) extends Table with SupportsRead with SupportsWrite {
 
   override def name(): String = "SimpleTable"
 
@@ -18,15 +18,13 @@ class SimpleTable(schema: StructType) extends Table with SupportsRead with Suppo
     java.util.EnumSet.of(TableCapability.BATCH_READ, TableCapability.BATCH_WRITE)
   }
 
-
   override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {
-//    new MyDataSourceWriteBuilder(info)
-    println("call VineDataSourceWriter from simpletable")
+    println("call VineDataSourceWriter from VineTable")
     new VineDataSourceWriteBuilder(info)
   }
 
   override def newScanBuilder(options: CaseInsensitiveStringMap): ScanBuilder = {
-    println("call VineDataSourceReader from simpletable")
+    println("call VineDataSourceReader from VineTable")
     new VineDataSourceReader(options)
   }
 }

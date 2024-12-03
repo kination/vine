@@ -6,24 +6,23 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 
 class VineDataSourceReader(options: CaseInsensitiveStringMap) extends ScanBuilder {
+  // TODO: parse dynamically based on schema inside metadata
   private val schema = StructType(Seq(
     StructField("id", StringType),
     StructField("name", StringType)
   ))
 
-  override def build(): Scan = new VineDataSourceScan(schema, options)
+  override def build(): Scan = {
+    val rawData = VineModule.readData("vine-test/result")
+    new VineDataSourceScan(rawData, schema)
+  }
 }
 
-class VineDataSourceScan(schema: StructType, options: CaseInsensitiveStringMap) extends Scan with Batch {
-
-  override def planInputPartitions(): Array[InputPartition] = {
-//    Array(new SimpleInputPartition)
-    null
-  }
-
-  override def createReaderFactory(): PartitionReaderFactory = {
-    new SimplePartitionReaderFactory
-  }
+class VineDataSourceScan(rawData: String, schema: StructType) extends Scan {
 
   override def readSchema(): StructType = schema
+
+  override def toBatch: Batch = {
+    new VineBatchReader(rawData)
+  }
 }
