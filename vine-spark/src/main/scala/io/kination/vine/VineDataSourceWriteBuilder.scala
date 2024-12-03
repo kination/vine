@@ -15,7 +15,7 @@ class VineDataSourceWriteBuilder(info: LogicalWriteInfo) extends WriteBuilder {
 class VineDataSourceWriter(info: LogicalWriteInfo) extends BatchWrite {
 
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
-    new SimpleDataWriterFactory
+    new VineDataWriterFactory
   }
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {

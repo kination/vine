@@ -5,25 +5,28 @@ import org.apache.spark.sql.connector.write.{DataWriter, DataWriterFactory, Writ
 
 import scala.collection.mutable.ListBuffer
 
-class SimpleDataWriterFactory extends DataWriterFactory {
+class VineDataWriterFactory extends DataWriterFactory {
 
   override def createWriter(partitionId: Int, taskId: Long): DataWriter[InternalRow] = {
-    new SimpleDataWriter
+    new VineDataWriter
   }
 }
 
-class SimpleDataWriter extends DataWriter[InternalRow] {
+class VineDataWriter extends DataWriter[InternalRow] {
+  // TODO:
+  //  - This is only supporting for 2 col only. Make data based on schema
+  //  - Put actual path from configs
+  //  - Think of setting up buffer
+  //  - Think of how-to make commit based on multiple partition
   private val buffer = ListBuffer[String]()
   private val bufferSize = 10
 
   override def write(record: InternalRow): Unit = {
-    // TODO: put actual path from configs
     val data = record.getString(0) + "," + record.getString(1)
     buffer += data
     if (buffer.size >= bufferSize) {
       flushBuffer()
     }
-//    VineJNI.writeDataToVine("vine-test/result", data)
   }
 
   override def commit(): WriterCommitMessage = {
