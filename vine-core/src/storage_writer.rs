@@ -113,13 +113,14 @@ pub fn write_dynamic_data<P: AsRef<Path>>(path: P, data: &Vec<&str>) -> parquet:
     let file_path = date_path.join(file_name);
     let file = File::create(file_path)?;
 
-    let meta_str = read_to_string("vine_meta.json").expect("Failed to read vine_meta.json");
+    let meta_str = read_to_string("vine-test/vine_meta.json").expect("Failed to read vine_meta.json");
     let metadata: Metadata = from_str(&meta_str).expect("Failed to deserialize metadata");
     let meta_fields = metadata.fields.clone();
 
     let mut schema_str = String::from("message schema {\n");
     for field in meta_fields {
         
+        // println!("field type -> {}", field.data_type.as_str());
         // TODO: Apply "required" only when "is_required" are true
         let field_type = match field.data_type.as_str() {
             "i32" => "REQUIRED INT32",
@@ -127,8 +128,10 @@ pub fn write_dynamic_data<P: AsRef<Path>>(path: P, data: &Vec<&str>) -> parquet:
             _ => continue,
         };
 
+        // println!("field field_type -> {}", field_type);
+
         match field_type {
-            "String" => schema_str.push_str(&format!("    {} {} (UTF8);\n", field_type, field.name)),
+            "REQUIRED BINARY" => schema_str.push_str(&format!("    {} {} (UTF8);\n", field_type, field.name)),
             _ => schema_str.push_str(&format!("    {} {};\n", field_type, field.name))
             
         }
@@ -137,10 +140,13 @@ pub fn write_dynamic_data<P: AsRef<Path>>(path: P, data: &Vec<&str>) -> parquet:
     schema_str.push_str("}\n");
 
     let schema = Arc::new(parse_message_type(schema_str.as_str())?);
+    let props = WriterProperties::builder()
+        .set_writer_version(parquet::file::properties::WriterVersion::PARQUET_1_0)
+        .build();
     let mut writer = SerializedFileWriter::new(
         file, 
         schema,  
-        Arc::new(WriterProperties::builder().build())
+        Arc::new(props)
     ).unwrap();
 
     // let meta_fields = metadata.fields.clone();
@@ -149,7 +155,7 @@ pub fn write_dynamic_data<P: AsRef<Path>>(path: P, data: &Vec<&str>) -> parquet:
     let mut int_values: Vec<Vec<i32>> = vec![Vec::new(); field_count];
 
     for row in data {
-        println!("row -> {:?}", row);
+        // println!("row -> {:?}", row);
         let values_array: Vec<&str> = row.split(',')
             .map(|s| s.trim())
             .collect();

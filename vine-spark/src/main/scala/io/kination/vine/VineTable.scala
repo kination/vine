@@ -10,7 +10,7 @@ import java.util
 
 class VineTable(schema: StructType) extends Table with SupportsRead with SupportsWrite {
 
-  override def name(): String = "SimpleTable"
+  override def name(): String = "VineTable"
 
   override def schema(): StructType = schema
 
@@ -25,6 +25,6 @@ class VineTable(schema: StructType) extends Table with SupportsRead with Support
 
   override def newScanBuilder(options: CaseInsensitiveStringMap): ScanBuilder = {
     println("call VineDataSourceReader from VineTable")
-    new VineDataSourceReader(options)
+    new VineDataSourceReader(options, schema)
   }
 }
