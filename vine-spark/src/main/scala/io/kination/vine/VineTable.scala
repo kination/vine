@@ -15,19 +15,23 @@ class VineTable(schema: StructType) extends Table with SupportsRead with Support
   override def schema(): StructType = schema
 
   override def capabilities(): util.Set[TableCapability] = {
-    java.util.EnumSet.of(TableCapability.BATCH_READ, TableCapability.BATCH_WRITE)
+    java.util.EnumSet.of(TableCapability.BATCH_READ, TableCapability.BATCH_WRITE, TableCapability.STREAMING_WRITE)
   }
 
   override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {
-    println("call VineDataSourceWriter from VineTable")
     // TODO: "schema" and schema inside "LogicalWriteInfo" can be different
     // - schema: schema defined by metadata.json
     // - info.schema: schema defined by user, when writing data from spark
+    var schema = this.schema()
+    
+    if (schema == null || schema.isEmpty) {
+      schema = info.schema()
+    }
     new VineDataSourceWriteBuilder(schema, info)
   }
 
   override def newScanBuilder(options: CaseInsensitiveStringMap): ScanBuilder = {
-    println("call VineDataSourceReader from VineTable")
+    // println("call VineDataSourceReader from VineTable")
     new VineDataSourceReader(options, schema)
   }
 }

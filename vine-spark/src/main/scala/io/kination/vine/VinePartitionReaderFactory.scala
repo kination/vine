@@ -2,17 +2,20 @@ package io.kination.vine
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.GenericInternalRow
+import org.apache.spark.sql.types._
 import org.apache.spark.sql.connector.read.{InputPartition, PartitionReader, PartitionReaderFactory}
 import org.apache.spark.unsafe.types.UTF8String
+import org.apache.spark.sql.types.StructType
 
-class VinePartitionReaderFactory extends PartitionReaderFactory {
+
+class VinePartitionReaderFactory(schema: StructType) extends PartitionReaderFactory {
 
   override def createReader(partition: InputPartition): PartitionReader[InternalRow] = {
-    new VinePartitionReader(partition.asInstanceOf[VineInputPartition].rawData)
+    new VinePartitionReader(partition.asInstanceOf[VineInputPartition].rawData, schema)
   }
 }
 
-class VinePartitionReader(rawData: String) extends PartitionReader[InternalRow] {
+class VinePartitionReader(rawData: String, schema: StructType) extends PartitionReader[InternalRow] {
   // TODO: think of good rawData format
   private val rows = rawData.split("\n").filter(_.nonEmpty).toList.map { line =>
     line.split(",").map(_.trim.stripPrefix("\"").stripSuffix("\""))
@@ -23,16 +26,15 @@ class VinePartitionReader(rawData: String) extends PartitionReader[InternalRow] 
   override def next(): Boolean = iterator.hasNext
 
   override def get(): InternalRow = {
-    // TODO: parse dynamically based on schema inside metadata
     val fields = iterator.next()
-    val id = fields(0)
-    val name = fields(1)
-    new GenericInternalRow(
-      Array[Any](
-        UTF8String.fromString(id),
-        UTF8String.fromString(name)
-      )
-    )
+    val values = schema.fields.zipWithIndex.map { case (field, idx) =>
+      field.dataType match {
+        case StringType => UTF8String.fromString(fields(idx))
+        case IntegerType => fields(idx).toInt
+        case _ => UTF8String.fromString(fields(idx)) // fallback
+      }
+    }
+    new GenericInternalRow(values.toArray)
   }
 
   override def close(): Unit = {}
