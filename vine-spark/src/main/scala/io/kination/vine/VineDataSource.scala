@@ -5,17 +5,25 @@ import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.json4s._
+import org.json4s.DefaultFormats
 import org.json4s.jackson.JsonMethods._
 
 import scala.io.Source
 import java.util
+import scala.reflect.io.File
 
 
 class VineDataSource extends TableProvider {
 
+  // Set this as "true", to get schema information based on DataFrame
+  override def supportsExternalMetadata(): Boolean = true
+
   override def inferSchema(options: CaseInsensitiveStringMap): StructType = {
     // TODO: Make infer logic
     new StructType()
+    // val path = options.get("path")
+    // val sampleData = readSampleData(path)
+    // inferSchemaFromData(sampleData)
   }
 
   /**
@@ -26,7 +34,17 @@ class VineDataSource extends TableProvider {
   override def getTable(schema: StructType, partitioning: Array[Transform], properties: util.Map[String, String]): Table = {
     val schemaFile = properties.get("path")
     val metaPath = s"$schemaFile/vine_meta.json"
-    val metadataSchema = readSchemaFromMetadata(metaPath)
+    
+    val metadataSchema = if (File(metaPath).exists) {
+      println("Read schema from metadata")
+      readSchemaFromMetadata(metaPath)
+    } else {
+      println("Read schema from DF")
+      schema
+    }
+
+    println(f"Schema -> $metadataSchema")
+
     new VineTable(metadataSchema)
   }
 
@@ -38,8 +56,8 @@ class VineDataSource extends TableProvider {
     val structFields = fields.map { field =>
       val name = field("name").toString
       val dataType = field("data_type").toString match {
-        case "i32"    => IntegerType
-        case "String" => StringType
+        case "integer" => IntegerType
+        case "string" => StringType
         // TODO: add more...
         case other    => throw new IllegalArgumentException(s"Unsupported data type: $other")
       }

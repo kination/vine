@@ -4,6 +4,12 @@ import org.apache.spark.sql.connector.write._
 import org.apache.spark.sql.connector.write.streaming.StreamingWrite
 import org.apache.spark.sql.types.StructType
 
+import org.json4s._
+import org.json4s.DefaultFormats
+import org.json4s.jackson.JsonMethods._
+
+import scala.reflect.io.File
+
 /**
   * 
   * TODO:
@@ -17,20 +23,49 @@ import org.apache.spark.sql.types.StructType
   */
 class VineDataSourceWriteBuilder(schema: StructType, info: LogicalWriteInfo) extends WriteBuilder {
   override def buildForBatch(): BatchWrite = {
-    val updatedSchema = updateSchema(schema, info.schema())
+    val updatedSchema = updateSchema(schema, info)
     new VineDataSourceWriter(updatedSchema, info)
   }
 
   override def buildForStreaming(): StreamingWrite = super.buildForStreaming()
 
   // TODO: update schema by comparing 2 data
-  private def updateSchema(tableSchema: StructType, logicalSchema: StructType): StructType = {
-    /* 
-    StructType(tableSchema.fields.map { field =>
-      writeSchema.find(_.name == field.name).getOrElse(field)
-    })
-     */
-    tableSchema
+  private def updateSchema(tableSchema: StructType, info: LogicalWriteInfo): StructType = {
+    val schemaFile = info.options().get("path")
+    val metaPath = s"$schemaFile/vine_meta.json"
+    println(f"update schema meta path -> $metaPath")
+    
+    if (File(metaPath).exists) {
+      tableSchema
+    } else {
+      createNewMetadataFile(info)
+      info.schema()
+    }
+  }
+
+  private def createNewMetadataFile(info: LogicalWriteInfo) {
+    val path = info.options().get("path")
+    val metaPath = s"$path/vine_meta.json"
+    
+    implicit val formats: DefaultFormats.type = DefaultFormats
+    val fields = info.schema().fields.zipWithIndex.map { case (field, index) =>
+      Map(
+        "id" -> (index + 1),
+        "name" -> field.name,
+        "data_type" -> field.dataType.typeName,
+        "is_required" -> !field.nullable
+      )
+    }
+    
+    val schemaJson = compact(render(
+      Extraction.decompose(Map(
+        "table_name" -> path,
+        "fields" -> fields
+      ))
+    ))
+    
+    new java.io.PrintWriter(metaPath) { write(schemaJson); close() }
+  
   }
 }
 
