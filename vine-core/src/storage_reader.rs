@@ -55,9 +55,10 @@ pub fn read_vine_data(dir_path: &str) -> Vec<String> {
                             let col_index = (field["id"].as_i64().unwrap_or(0) - 1) as usize;
                             let data_type = field["data_type"].as_str().expect("data_type should be string");
 
+                            // println!("{}", data_type);
                             let value = match data_type {
-                                "i32" => row.get_int(col_index).unwrap_or_default().to_string(),
-                                "String" => {
+                                "integer" => row.get_int(col_index).unwrap_or_default().to_string(),
+                                "string" => {
                                     // let bytes = row.get_bytes(col_index).expect("Error on getting bytes");
                                     // String::from_utf8(bytes.data().to_vec()).unwrap_or_default()
                                     row.get_string(col_index).unwrap().clone()

@@ -123,8 +123,8 @@ pub fn write_dynamic_data<P: AsRef<Path>>(path: P, data: &Vec<&str>) -> parquet:
         // println!("field type -> {}", field.data_type.as_str());
         // TODO: Apply "required" only when "is_required" are true
         let field_type = match field.data_type.as_str() {
-            "i32" => "REQUIRED INT32",
-            "String" => "REQUIRED BINARY",
+            "integer" => "REQUIRED INT32",
+            "string" => "REQUIRED BINARY",
             _ => continue,
         };
 
@@ -164,10 +164,10 @@ pub fn write_dynamic_data<P: AsRef<Path>>(path: P, data: &Vec<&str>) -> parquet:
             let raw_value = values_array.get(i).unwrap_or(&"");
             
             match field.data_type.as_str() {
-                "String" => {
+                "string" => {
                     values[i].push(ByteArray::from(*raw_value));
                 },
-                "i32" => {
+                "integer" => {
                     let int_value = raw_value.parse::<i32>().unwrap_or_default();
                     int_values[i].push(int_value);
                 },
@@ -181,12 +181,12 @@ pub fn write_dynamic_data<P: AsRef<Path>>(path: P, data: &Vec<&str>) -> parquet:
     for (i, field) in metadata.fields.iter().enumerate() {
         if let Some(mut col_writer) = row_group_writer.next_column().unwrap() {
             match field.data_type.as_str() {
-                "String" => {
+                "string" => {
                     col_writer.typed::<ByteArrayType>()
                             .write_batch(&values[i], None, None)
                             .unwrap();
                 },
-                "i32" => {
+                "integer" => {
                     col_writer.typed::<Int32Type>()
                             .write_batch(&int_values[i], None, None)
                             .unwrap();
