@@ -1,18 +1,18 @@
 package io.kination.vine
 
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.connector.write.{DataWriter, DataWriterFactory, WriterCommitMessage}
-
+import org.apache.spark.sql.connector.write._
+import org.apache.spark.sql.types.StructType
 import scala.collection.mutable.ListBuffer
 
-class VineDataWriterFactory extends DataWriterFactory {
+class VineDataWriterFactory(schema: StructType, info: PhysicalWriteInfo) extends DataWriterFactory {
 
   override def createWriter(partitionId: Int, taskId: Long): DataWriter[InternalRow] = {
-    new VineDataWriter
+    new VineDataWriter(schema, info)
   }
 }
 
-class VineDataWriter extends DataWriter[InternalRow] {
+class VineDataWriter(schema: StructType, info: PhysicalWriteInfo) extends DataWriter[InternalRow] {
   // TODO:
   //  - This is only supporting for 2 col only. Make data based on schema
   //  - Put actual path from configs
@@ -22,8 +22,29 @@ class VineDataWriter extends DataWriter[InternalRow] {
   private val bufferSize = 10
 
   override def write(record: InternalRow): Unit = {
-    val data = record.getString(0) + "," + record.getString(1)
+    println(f"Write data -> ${record.numFields}")
+    if (schema.fields.size != record.numFields) {
+      // TODO: number of schema fields and actual record fields are not matching.
+      // Make proper update
+    }
+
+    val data = schema.fields.zipWithIndex.map { case (field, idx) =>
+      println(f"data type -> ${field.dataType}")
+      field.dataType match {
+        case org.apache.spark.sql.types.StringType => record.getString(idx)
+        case org.apache.spark.sql.types.IntegerType => record.getInt(idx).toString
+        case org.apache.spark.sql.types.LongType => record.getLong(idx).toString
+        case org.apache.spark.sql.types.DoubleType => record.getDouble(idx).toString
+        case org.apache.spark.sql.types.BooleanType => record.getBoolean(idx).toString
+        case org.apache.spark.sql.types.TimestampType => record.getLong(idx).toString
+        // Add more types as needed
+        case _ => record.getString(idx) // fallback to string for unsupported types
+      }
+    }.mkString(",")
+    
+
     buffer += data
+    // println(buffer)
     if (buffer.size >= bufferSize) {
       flushBuffer()
     }
