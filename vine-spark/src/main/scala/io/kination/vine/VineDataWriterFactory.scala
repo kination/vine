@@ -22,14 +22,12 @@ class VineDataWriter(schema: StructType, info: PhysicalWriteInfo) extends DataWr
   private val bufferSize = 10
 
   override def write(record: InternalRow): Unit = {
-    println(f"Write data -> ${record.numFields}")
     if (schema.fields.size != record.numFields) {
       // TODO: number of schema fields and actual record fields are not matching.
       // Make proper update
     }
 
     val data = schema.fields.zipWithIndex.map { case (field, idx) =>
-      println(f"data type -> ${field.dataType}")
       field.dataType match {
         case org.apache.spark.sql.types.StringType => record.getString(idx)
         case org.apache.spark.sql.types.IntegerType => record.getInt(idx).toString

@@ -33,7 +33,6 @@ class VineDataSourceWriteBuilder(schema: StructType, info: LogicalWriteInfo) ext
   private def updateSchema(tableSchema: StructType, info: LogicalWriteInfo): StructType = {
     val schemaFile = info.options().get("path")
     val metaPath = s"$schemaFile/vine_meta.json"
-    println(f"update schema meta path -> $metaPath")
     
     if (File(metaPath).exists) {
       tableSchema
@@ -71,10 +70,7 @@ class VineDataSourceWriteBuilder(schema: StructType, info: LogicalWriteInfo) ext
 
 class VineDataSourceWriter(schema: StructType, info: LogicalWriteInfo) extends BatchWrite {
 
-  println(f"logical -> $info")
-
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
-    println(f"physical -> $info")
     new VineDataWriterFactory(schema, info)
   }
 

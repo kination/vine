@@ -36,14 +36,10 @@ class VineDataSource extends TableProvider {
     val metaPath = s"$schemaFile/vine_meta.json"
     
     val metadataSchema = if (File(metaPath).exists) {
-      println("Read schema from metadata")
       readSchemaFromMetadata(metaPath)
     } else {
-      println("Read schema from DF")
       schema
     }
-
-    println(f"Schema -> $metadataSchema")
 
     new VineTable(metadataSchema)
   }
