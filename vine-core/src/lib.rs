@@ -9,7 +9,7 @@ use jni::objects::{JClass, JString};
 use jni::sys::{jobject, jstring};
 
 use metadata::{Metadata, MetadataField};
-use storage_writer::write_dynamic_data;
+use storage_writer::write_data;
 use storage_reader::read_vine_data;
 
 #[no_mangle]
@@ -45,5 +45,5 @@ pub extern "C" fn Java_io_kination_vine_VineModule_writeDataToVine(
     let path_str: String = env.get_string(&path).expect("Fail getting path").into();
     let data_str: String = env.get_string(&data).expect("Fail getting path").into();
     let rows: Vec<&str> = data_str.lines().collect();
-    write_dynamic_data(&path_str, &rows).expect("Failed to write data");
+    write_data(&path_str, &rows).expect("Failed to write data");
 }

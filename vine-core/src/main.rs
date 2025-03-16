@@ -3,7 +3,7 @@ mod storage_writer;
 mod storage_reader;
 
 use metadata::{Metadata, MetadataField};
-use storage_writer::{write_data, write_dynamic_data};
+// use storage_writer::{write_data};
 // use storage_reader::read_data;
 
 #[derive(Debug)]

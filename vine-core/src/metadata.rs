@@ -16,6 +16,15 @@ pub struct MetadataField {
     pub is_required: bool
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub enum Value {
+    String(String),
+    Int(i32),
+    Bool(bool),
+    Double(f64),
+}
+
+
 impl Metadata {
     pub fn new(table_name: &str, fields: Vec<MetadataField>) -> Self {
         Metadata {
