@@ -25,8 +25,10 @@ pub fn read_vine_data(dir_path: &str) -> Vec<String> {
 
     directories.sort_by_key(|(date, _)| *date);
 
-    // Read metadata file
-    let meta_str = read_to_string("vine-test/vine_meta.json").expect("Failed to read vine_meta.json");
+    // Read metadata file from root of output directory
+    let meta_path = format!("{}/vine_meta.json", dir_path);
+    let meta_str = read_to_string(&meta_path)
+        .unwrap_or_else(|_| panic!("Failed to read metadata from {}", meta_path));
     let meta: Value = serde_json::from_str(&meta_str)
                     .expect("Failed to parse metadata JSON");
 

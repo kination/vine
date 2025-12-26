@@ -26,12 +26,15 @@ pub fn write_data<P: AsRef<Path>>(path: P, data: &Vec<&str>) -> parquet::errors:
     let date_path = base_path.join(&date_dir);
 
     fs::create_dir_all(&date_path)?;
-    
+
     let file_name = format!("data_{}.parquet", time_str);
     let file_path = date_path.join(file_name);
     let file = File::create(file_path)?;
 
-    let meta_str = fs::read_to_string("vine-test/vine_meta.json").expect("Failed to read vine_meta.json");
+    // Read metadata from root of output directory
+    let meta_path = base_path.join("vine_meta.json");
+    let meta_str = fs::read_to_string(&meta_path)
+        .unwrap_or_else(|_| panic!("Failed to read metadata from {:?}", meta_path));
     let metadata: Metadata = serde_json::from_str(&meta_str).expect("Failed to deserialize metadata");
     let meta_fields = metadata.fields.clone();
 
