@@ -2,8 +2,8 @@ use crate::metadata::Metadata;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// Cache for reader metadata and schema information
-/// Prevents repeated metadata parsing and ensures consistency with writer
+/// Caching 'reader metadata'/'schema information'
+/// Prevent frequent metadata parsing and ensures consistency with 'writer'
 pub struct ReaderCache {
     pub metadata: Metadata,
     pub base_path: PathBuf,

@@ -4,7 +4,7 @@ use tempfile::TempDir;
 
 // Import from vine_core crate
 use vine_core::storage_reader::read_vine_data;
-use vine_core::storage_writer::VineBatchWriter;
+use vine_core::vine_batch_writer::VineBatchWriter;
 
 /// Helper function to create test metadata
 fn create_test_metadata(dir: &Path) -> std::io::Result<()> {

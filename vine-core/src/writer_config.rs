@@ -44,7 +44,7 @@ impl Default for WriterConfig {
 }
 
 impl WriterConfig {
-    /// Create config optimized for maximum write throughput
+    /// Create config optimized for high-performance write throughput
     pub fn high_throughput() -> Self {
         Self {
             compression: Compression::UNCOMPRESSED,
@@ -80,7 +80,7 @@ impl WriterConfig {
             .set_writer_version(parquet::file::properties::WriterVersion::PARQUET_2_0)
             .set_write_batch_size(self.row_group_size);
 
-        let stats = if self.enable_statistics {
+        let stats: EnabledStatistics = if self.enable_statistics {
             EnabledStatistics::Page
         } else {
             EnabledStatistics::None

@@ -3,7 +3,8 @@ use std::path::Path;
 use tempfile::TempDir;
 
 // Import from vine_core crate
-use vine_core::storage_writer::{VineBatchWriter, VineStreamingWriter};
+use vine_core::vine_batch_writer::VineBatchWriter;
+use vine_core::vine_streaming_writer::VineStreamingWriter;
 use vine_core::writer_config::WriterConfig;
 
 /// Helper function to create test metadata
