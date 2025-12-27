@@ -16,4 +16,4 @@ tempfile = "3.8"
 
 [lib]
 name = "vine_core"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
