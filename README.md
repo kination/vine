@@ -1,5 +1,100 @@
-# vine (WIP)
-PoC of "yet another datalake format", based on Rust
+# Vine - Write-Optimized Datalake Format (WIP)
 
-https://docs.google.com/presentation/d/1-gT93SZ0XrQrAGgmbkHzQlQj_U38BkIdYl2T_pj_aC4/edit?usp=sharing
+> **Status**: Work in Progress
 
+This project aimes 'datalake table format' optimized for **streaming data writes**, built on Rust for high performance. 
+
+## Quick Start
+
+### Build
+
+```bash
+./build.sh
+```
+
+This builds:
+- `vine-core`: Rust library for Parquet I/O
+- `vine-spark`: Spark DataSource V2 connector
+
+### Usage with Spark
+
+```scala
+// Write streaming data
+spark.readStream
+  .format("vine")
+  .load("input-path")
+  .writeStream
+  .format("vine")
+  .option("path", "/data/my-table")
+  .start()
+
+// Read with Spark SQL
+val df = spark.read.format("vine").load("/data/my-table")
+df.show()
+```
+
+## Architecture
+
+```
+┌─────────────────────────────────────┐
+│   Query Engines (Spark, Trino)     │
+└──────────────┬──────────────────────┘
+               │ DataSource API
+┌──────────────▼──────────────────────┐
+│  Connectors (vine-spark/vine-trino) │
+└──────────────┬──────────────────────┘
+               │ JNI
+┌──────────────▼──────────────────────┐
+│  Rust Core (vine-core)              │
+│  - Fast Parquet writes              │
+│  - Date-based partitioning          │
+└──────────────┬──────────────────────┘
+               │
+┌──────────────▼──────────────────────┐
+│  Storage (Parquet files)            │
+│  2024-12-26/data_143025.parquet     │
+│  2024-12-27/data_091500.parquet     │
+└─────────────────────────────────────┘
+```
+
+## Components
+
+| Component | Language | Status | Purpose |
+|-----------|----------|--------|---------|
+| **vine-core** | Rust | WIP | Write-optimized datalake table format |
+| **vine-spark** | Scala | WIP | Spark DataSource V2 connector |
+| **vine-trino** | Java | Planned | Trino connector (not started) |
+
+## Storage Format
+
+- **Files**: Apache Parquet (columnar)
+- **Partitioning**: Date-based directories (`YYYY-MM-DD/data_HHMMSS.parquet`)
+- **Metadata**: JSON schema file (`vine_meta.json`)
+- **Types**: integer, string, boolean, double
+
+## Documentation
+
+- [Presentation](https://docs.google.com/presentation/d/1-gT93SZ0XrQrAGgmbkHzQlQj_U38BkIdYl2T_pj_aC4/edit?slide=id.p)
+
+## Development
+
+### Build Components Individually
+
+**Rust Core**
+```bash
+cd vine-core
+cargo build --release
+cargo test
+```
+
+**Spark Connector**
+```bash
+cd vine-spark
+sbt clean assembly
+```
+
+### Requirements
+
+- Rust 1.70+ (for vine-core)
+- Scala 2.13, sbt 1.x (for vine-spark)
+- Java 11+ (for Spark/Trino connectors)
