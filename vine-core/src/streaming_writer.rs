@@ -95,7 +95,7 @@ impl StreamingWriter {
             self.close_current_file()?;
         }
 
-        // Ensure we have an open file
+        // Ensure file exists, and create new one if not.
         if self.current_file.is_none() {
             self.open_new_file()?;
         }
@@ -179,18 +179,18 @@ impl StreamingWriter {
         Ok(())
     }
 
-    /// Check if we should rotate to a new file
+    /// Check if processing logic should rotate to a new file
     fn should_rotate_file(&self, new_rows: usize) -> bool {
         if self.current_file.is_none() {
             return false;
         }
 
-        // Rotate if we exceed row group size or estimated file size
+        // Rotate if we exceed row group size, or estimated file size
         self.current_row_count + new_rows > self.config.row_group_size
             || self.current_file_size > self.config.max_file_size
     }
 
-    /// Open a new Parquet file
+    /// Open new Parquet file
     fn open_new_file(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let now = Local::now();
         let date_dir = now.format("%Y-%m-%d").to_string();

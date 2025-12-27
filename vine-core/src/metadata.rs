@@ -5,7 +5,7 @@ use std::io::{self, Write};
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Metadata {
     pub table_name: String,
-    pub fields: Vec<MetadataField>
+    pub fields: Vec<MetadataField>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

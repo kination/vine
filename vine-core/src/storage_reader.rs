@@ -6,19 +6,27 @@ use parquet::record::RowAccessor;
 
 use crate::reader_cache::ReaderCache;
 
-/// Read all data from Vine format storage
+
+/// Read all data from Vine format storage (convenience function for non-JNI usage)
+/// NOTE: For JNI, 'read_vine_data_with_cache' should be used.
+pub fn read_vine_data(dir_path: &str) -> Vec<String> {
+    let base_path = PathBuf::from(dir_path);
+    let cache = ReaderCache::new(base_path)
+        .unwrap_or_else(|e| panic!("Failed to initialize reader cache: {}", e));
+
+    read_vine_data_with_cache(dir_path, &cache)
+}
+
+/// Read all data from Vine format storage with external cache
 ///
-/// This function:
-/// 1. Loads and caches metadata once
+/// 1. Uses provided cache (from JNI layer)
 /// 2. Scans date-partitioned directories in chronological order
 /// 3. Reads Parquet files with proper type handling
 /// 4. Returns CSV-formatted rows for JNI compatibility
-pub fn read_vine_data(dir_path: &str) -> Vec<String> {
+///
+/// NOTE: For non-JNI, use read_vine_data() which creates its own cache.
+pub fn read_vine_data_with_cache(dir_path: &str, cache: &ReaderCache) -> Vec<String> {
     let base_path = PathBuf::from(dir_path);
-
-    // Initialize reader cache (loads metadata once)
-    let cache = ReaderCache::new(base_path.clone())
-        .unwrap_or_else(|e| panic!("Failed to initialize reader cache: {}", e));
 
     let mut row_list = Vec::new();
     let mut directories = Vec::new();
@@ -33,7 +41,6 @@ pub fn read_vine_data(dir_path: &str) -> Vec<String> {
 
         if path.is_dir() {
             if let Some(dir_name) = path.file_name().and_then(|s| s.to_str()) {
-                // Try to parse as date (YYYY-MM-DD format)
                 if let Ok(date) = NaiveDate::parse_from_str(dir_name, "%Y-%m-%d") {
                     directories.push((date, path));
                 }
@@ -46,15 +53,15 @@ pub fn read_vine_data(dir_path: &str) -> Vec<String> {
 
     // Read all Parquet files from date directories
     for (_, dir_path) in directories {
-        let sub_entries = fs::read_dir(&dir_path)
+        let sub_dir = fs::read_dir(&dir_path)
             .unwrap_or_else(|_| panic!("Cannot read directory: {:?}", dir_path));
 
-        for file_entry_result in sub_entries {
+        for file_entry_result in sub_dir {
             let file_path = file_entry_result
                 .expect("Cannot read file entry")
                 .path();
 
-            // Process only Parquet files
+            // Process parquet files only
             if file_path.extension().map_or(false, |ext| ext == "parquet") {
                 if let Err(e) = read_parquet_file(&file_path, &cache, &mut row_list) {
                     eprintln!("Warning: Failed to read file {:?}: {}", file_path, e);
@@ -67,7 +74,7 @@ pub fn read_vine_data(dir_path: &str) -> Vec<String> {
     row_list
 }
 
-/// Read a single Parquet file and append rows to row_list
+/// Read single parquet file, and append rows to row_list
 fn read_parquet_file(
     file_path: &PathBuf,
     cache: &ReaderCache,

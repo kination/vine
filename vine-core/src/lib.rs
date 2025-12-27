@@ -2,6 +2,8 @@ pub mod metadata;
 pub mod writer_config;
 pub mod writer_cache;
 pub mod streaming_writer;
+pub mod vine_batch_writer;
+pub mod vine_streaming_writer;
 pub mod storage_writer;
 pub mod reader_cache;
 pub mod storage_reader;
@@ -10,19 +12,56 @@ use std::ffi::CString;
 
 use jni::JNIEnv;
 use jni::objects::{JClass, JString};
-use jni::sys::{jobject, jstring};
+use jni::sys::{jobject};
 
-use metadata::{Metadata, MetadataField};
-use storage_writer::{write_data, VineBatchWriter, VineStreamingWriter};
-use storage_reader::read_vine_data;
-use writer_config::WriterConfig;
+// use metadata::{Metadata, MetadataField};
+use storage_writer::write_data;
+use vine_batch_writer::VineBatchWriter;
+use vine_streaming_writer::VineStreamingWriter;
+use storage_reader::read_vine_data_with_cache;
+// use writer_config::WriterConfig;
 use std::sync::Mutex;
 use std::collections::HashMap;
+use reader_cache::ReaderCache;
+use writer_cache::WriterCache;
 
-// Global registry for streaming writers
+// Global cache registry for all writers and readers
 lazy_static::lazy_static! {
+    // Streaming writer registry (already implemented)
     static ref STREAMING_WRITERS: Mutex<HashMap<i64, VineStreamingWriter>> = Mutex::new(HashMap::new());
     static ref WRITER_ID_COUNTER: Mutex<i64> = Mutex::new(0);
+
+    // Reader cache: path -> ReaderCache
+    static ref READER_CACHE: Mutex<HashMap<String, ReaderCache>> = Mutex::new(HashMap::new());
+
+    // Writer cache: path -> WriterCache
+    static ref WRITER_CACHE: Mutex<HashMap<String, WriterCache>> = Mutex::new(HashMap::new());
+}
+
+// Helper function to ensure writer cache exists for a path
+fn ensure_writer_cache(path: &str) {
+    let mut cache_map = WRITER_CACHE.lock().unwrap();
+    if !cache_map.contains_key(path) {
+        match WriterCache::new(std::path::PathBuf::from(path)) {
+            Ok(cache) => {
+                cache_map.insert(path.to_string(), cache);
+            }
+            Err(e) => panic!("Failed to initialize writer cache for {}: {}", path, e),
+        }
+    }
+}
+
+// Helper function to ensure reader cache exists for a path
+fn ensure_reader_cache(path: &str) {
+    let mut cache_map = READER_CACHE.lock().unwrap();
+    if !cache_map.contains_key(path) {
+        match ReaderCache::new(std::path::PathBuf::from(path)) {
+            Ok(cache) => {
+                cache_map.insert(path.to_string(), cache);
+            }
+            Err(e) => panic!("Failed to initialize reader cache for {}: {}", path, e),
+        }
+    }
 }
 
 // ============================================================================
@@ -39,10 +78,17 @@ pub extern "C" fn Java_io_kination_vine_VineModule_readDataFromVine(
 ) -> jobject {
     let path: String = env
         .get_string(&dir_path)
-        .expect("Cannot get data from dir_path")
+        .expect("Cannot find data in 'dir_path'")
         .into();
-    let rows = read_vine_data(&path);
-    let mut result = String::new();
+
+    // Ensure global cache exists for this path
+    // After ensure, get cache reference and use it for reading data
+    ensure_reader_cache(&path);
+    let cache_map = READER_CACHE.lock().unwrap();
+    let cache = cache_map.get(&path).expect("Cache should exist after ensure_reader_cache");
+
+    let rows: Vec<String> = read_vine_data_with_cache(&path, cache);
+    let mut result: String = String::new();
 
     for row in rows {
         result.push_str(&row);
@@ -86,8 +132,11 @@ pub extern "C" fn Java_io_kination_vine_VineModule_batchWriteBalanced(
 ) {
     let path_str: String = env.get_string(&path).expect("Fail getting path").into();
     let data_str: String = env.get_string(&data).expect("Fail getting data").into();
-    let rows: Vec<&str> = data_str.lines().collect();
 
+    // Use global cache for writer - check cache first, create if not exists
+    ensure_writer_cache(&path_str);
+
+    let rows: Vec<&str> = data_str.lines().collect();
     VineBatchWriter::write_balanced(&path_str, &rows).expect("Failed to batch write");
 }
 
@@ -102,8 +151,11 @@ pub extern "C" fn Java_io_kination_vine_VineModule_batchWriteHighThroughput(
 ) {
     let path_str: String = env.get_string(&path).expect("Fail getting path").into();
     let data_str: String = env.get_string(&data).expect("Fail getting data").into();
-    let rows: Vec<&str> = data_str.lines().collect();
 
+    // Use global cache for writer
+    ensure_writer_cache(&path_str);
+
+    let rows: Vec<&str> = data_str.lines().collect();
     VineBatchWriter::write_high_throughput(&path_str, &rows)
         .expect("Failed to batch write with high throughput");
 }
@@ -119,8 +171,11 @@ pub extern "C" fn Java_io_kination_vine_VineModule_batchWriteHighCompression(
 ) {
     let path_str: String = env.get_string(&path).expect("Fail getting path").into();
     let data_str: String = env.get_string(&data).expect("Fail getting data").into();
-    let rows: Vec<&str> = data_str.lines().collect();
 
+    // Use global cache for writer
+    ensure_writer_cache(&path_str);
+
+    let rows: Vec<&str> = data_str.lines().collect();
     VineBatchWriter::write_high_compression(&path_str, &rows)
         .expect("Failed to batch write with high compression");
 }
