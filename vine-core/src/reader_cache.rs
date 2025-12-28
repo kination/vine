@@ -1,6 +1,5 @@
 use crate::metadata::Metadata;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 /// Caching 'reader metadata'/'schema information'
 /// Prevent frequent metadata parsing and ensures consistency with 'writer'
@@ -45,5 +44,50 @@ impl ReaderCache {
             ));
         }
         Ok(())
+    }
+
+    // ========================================================================
+    // Schema-on-Read Functions
+    // ========================================================================
+
+    /// Create reader cache with schema-on-read fallback
+    ///
+    /// Tries multiple sources in order:
+    /// 1. vine_meta.json (traditional)
+    /// 2. _meta/schema.json (cache)
+    /// 3. Infer from Parquet files
+    pub fn new_with_fallback(base_path: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
+        // Option 1: vine_meta.json (traditional, highest priority)
+        let meta_path = base_path.join("vine_meta.json");
+        if meta_path.exists() {
+            return Self::new(base_path);
+        }
+
+        // Option 2: _meta/schema.json (cached schema)
+        if let Some(metadata) = Metadata::load_cached(&base_path) {
+            // Validate metadata
+            if metadata.fields.is_empty() {
+                return Err("Cached metadata must have at least one field".into());
+            }
+            return Ok(Self {
+                metadata,
+                base_path,
+            });
+        }
+
+        // Option 3: Infer from Parquet files
+        let metadata = Metadata::infer_from_parquet(&base_path)?;
+
+        // Optionally save to cache for future reads (async, non-blocking)
+        let cache_path = base_path.clone();
+        let metadata_clone = metadata.clone();
+        std::thread::spawn(move || {
+            let _ = metadata_clone.save_to_cache(&cache_path);
+        });
+
+        Ok(Self {
+            metadata,
+            base_path,
+        })
     }
 }

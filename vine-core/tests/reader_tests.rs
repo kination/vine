@@ -5,6 +5,8 @@ use tempfile::TempDir;
 // Import from vine_core crate
 use vine_core::storage_reader::read_vine_data;
 use vine_core::vine_batch_writer::VineBatchWriter;
+use vine_core::metadata::Metadata;
+use vine_core::reader_cache::ReaderCache;
 
 /// Helper function to create test metadata
 fn create_test_metadata(dir: &Path) -> std::io::Result<()> {
@@ -433,4 +435,158 @@ fn test_read_field_order_consistency() {
     // Should read in same order as written (metadata field order)
     assert_eq!(rows[0], "foo,1,bar");
     assert_eq!(rows[1], "baz,2,qux");
+}
+
+// ============================================================================
+// Schema-on-Read Tests
+// ============================================================================
+
+#[test]
+fn test_infer_schema_from_parquet() {
+    let temp_dir = TempDir::new().unwrap();
+    let path = temp_dir.path();
+
+    // First write data with metadata
+    create_test_metadata(path).unwrap();
+    let data = vec!["1,alice", "2,bob"];
+    VineBatchWriter::write_balanced(path, &data).unwrap();
+
+    // Remove the metadata file
+    fs::remove_file(path.join("vine_meta.json")).unwrap();
+
+    // Now infer schema from Parquet
+    let metadata = Metadata::infer_from_parquet(path).unwrap();
+
+    assert_eq!(metadata.table_name, "inferred");
+    assert_eq!(metadata.fields.len(), 2);
+    assert_eq!(metadata.fields[0].name, "id");
+    assert_eq!(metadata.fields[0].data_type, "integer");
+    assert_eq!(metadata.fields[1].name, "name");
+    assert_eq!(metadata.fields[1].data_type, "string");
+}
+
+#[test]
+fn test_infer_schema_all_types() {
+    let temp_dir = TempDir::new().unwrap();
+    let path = temp_dir.path();
+
+    // Create metadata with all types
+    create_metadata_all_types(path).unwrap();
+    let data = vec!["1,alice,true,3.14"];
+    VineBatchWriter::write_balanced(path, &data).unwrap();
+
+    // Remove metadata and infer
+    fs::remove_file(path.join("vine_meta.json")).unwrap();
+    let metadata = Metadata::infer_from_parquet(path).unwrap();
+
+    assert_eq!(metadata.fields.len(), 4);
+    assert_eq!(metadata.fields[0].data_type, "integer");
+    assert_eq!(metadata.fields[1].data_type, "string");
+    assert_eq!(metadata.fields[2].data_type, "boolean");
+    assert_eq!(metadata.fields[3].data_type, "double");
+}
+
+#[test]
+fn test_save_and_load_cached_schema() {
+    let temp_dir = TempDir::new().unwrap();
+    let path = temp_dir.path();
+
+    // Create test metadata
+    create_test_metadata(path).unwrap();
+    let data = vec!["1,alice"];
+    VineBatchWriter::write_balanced(path, &data).unwrap();
+
+    // Infer schema and save to cache
+    let metadata = Metadata::infer_from_parquet(path).unwrap();
+    metadata.save_to_cache(path).unwrap();
+
+    // Verify cache file exists
+    assert!(path.join("_meta").join("schema.json").exists());
+
+    // Load cached schema
+    let cached = Metadata::load_cached(path);
+    assert!(cached.is_some());
+    let cached = cached.unwrap();
+    assert_eq!(cached.fields.len(), 2);
+    assert_eq!(cached.fields[0].name, "id");
+}
+
+#[test]
+fn test_reader_cache_fallback_with_metadata() {
+    let temp_dir = TempDir::new().unwrap();
+    let path = temp_dir.path();
+
+    // Create metadata and write data
+    create_test_metadata(path).unwrap();
+    let data = vec!["1,alice"];
+    VineBatchWriter::write_balanced(path, &data).unwrap();
+
+    // Should use vine_meta.json when available
+    let cache = ReaderCache::new_with_fallback(path.to_path_buf()).unwrap();
+    assert_eq!(cache.metadata.fields.len(), 2);
+    assert_eq!(cache.metadata.table_name, "test_table");
+}
+
+#[test]
+fn test_reader_cache_fallback_infer_from_parquet() {
+    let temp_dir = TempDir::new().unwrap();
+    let path = temp_dir.path();
+
+    // Create metadata, write data, then remove metadata
+    create_test_metadata(path).unwrap();
+    let data = vec!["1,alice", "2,bob"];
+    VineBatchWriter::write_balanced(path, &data).unwrap();
+    fs::remove_file(path.join("vine_meta.json")).unwrap();
+
+    // Should infer from Parquet files
+    let cache = ReaderCache::new_with_fallback(path.to_path_buf()).unwrap();
+    assert_eq!(cache.metadata.fields.len(), 2);
+    assert_eq!(cache.metadata.table_name, "inferred");
+    assert_eq!(cache.metadata.fields[0].name, "id");
+    assert_eq!(cache.metadata.fields[1].name, "name");
+
+    // Wait a bit for async cache saving
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    // Cache should now be saved
+    assert!(path.join("_meta").join("schema.json").exists());
+}
+
+#[test]
+fn test_reader_cache_fallback_use_cached_schema() {
+    let temp_dir = TempDir::new().unwrap();
+    let path = temp_dir.path();
+
+    // Create and save cached schema manually
+    let cached_metadata = r#"{
+        "table_name": "cached_table",
+        "fields": [
+            {"id": 1, "name": "col1", "data_type": "integer", "is_required": true},
+            {"id": 2, "name": "col2", "data_type": "string", "is_required": true}
+        ]
+    }"#;
+
+    fs::create_dir_all(path.join("_meta")).unwrap();
+    fs::write(path.join("_meta").join("schema.json"), cached_metadata).unwrap();
+
+    // Create a dummy parquet file (not needed for this test since cache exists)
+    create_test_metadata(path).unwrap();
+    let data = vec!["1,alice"];
+    VineBatchWriter::write_balanced(path, &data).unwrap();
+    fs::remove_file(path.join("vine_meta.json")).unwrap();
+
+    // Should use cached schema
+    let cache = ReaderCache::new_with_fallback(path.to_path_buf()).unwrap();
+    assert_eq!(cache.metadata.table_name, "cached_table");
+    assert_eq!(cache.metadata.fields[0].name, "col1");
+}
+
+#[test]
+fn test_infer_schema_no_parquet_files() {
+    let temp_dir = TempDir::new().unwrap();
+    let path = temp_dir.path();
+
+    // Empty directory, no parquet files
+    let result = Metadata::infer_from_parquet(path);
+    assert!(result.is_err());
 }
