@@ -21,12 +21,39 @@ pub struct MetadataField {
     pub is_required: bool
 }
 
+/// Supported Vine data types
+///
+/// Primitive types:
+/// - byte/tinyint: 8-bit signed integer
+/// - short/smallint: 16-bit signed integer
+/// - integer/int: 32-bit signed integer
+/// - long/bigint: 64-bit signed integer
+/// - float: 32-bit floating point
+/// - double: 64-bit floating point
+/// - boolean: true/false
+/// - string: UTF-8 text
+/// - binary: byte array
+///
+/// Date/Time types:
+/// - date: calendar date (YYYY-MM-DD)
+/// - timestamp: date and time with millisecond precision
+///
+/// Numeric types:
+/// - decimal: fixed-precision decimal (precision, scale)
 #[derive(Serialize, Deserialize, Clone)]
 pub enum Value {
-    String(String),
+    Byte(i8),
+    Short(i16),
     Int(i32),
-    Bool(bool),
+    Long(i64),
+    Float(f32),
     Double(f64),
+    Bool(bool),
+    String(String),
+    Binary(Vec<u8>),
+    Date(i32),        // Days since Unix epoch
+    Timestamp(i64),   // Milliseconds since Unix epoch
+    Decimal(String),  // String representation for precision
 }
 
 

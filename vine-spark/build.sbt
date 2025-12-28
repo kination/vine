@@ -29,6 +29,7 @@ version := "0.0.1"
 libraryDependencies ++= Seq(
     "org.apache.spark" %% "spark-sql" % "3.4.0" % Provided,
     "org.apache.parquet" % "parquet-avro" % "1.12.0",
+    "org.scalatest" %% "scalatest" % "3.2.17" % Test
 //    "com.fasterxml.jackson.module" %% "jackson-module-scala" % "2.13.0"
 )
 

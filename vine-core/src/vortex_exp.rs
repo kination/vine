@@ -27,10 +27,28 @@ pub type VortexResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 /// Convert Vine metadata schema to Vortex DType
 ///
 /// Maps Vine data types to Vortex DTypes:
-/// - "integer" -> PType::I32
-/// - "string" -> Utf8
-/// - "boolean" -> Bool
+///
+/// **Integer types:**
+/// - "byte", "tinyint" -> PType::I8
+/// - "short", "smallint" -> PType::I16
+/// - "integer", "int" -> PType::I32
+/// - "long", "bigint" -> PType::I64
+///
+/// **Floating point types:**
+/// - "float" -> PType::F32
 /// - "double" -> PType::F64
+///
+/// **Other primitive types:**
+/// - "boolean", "bool" -> Bool
+/// - "string" -> Utf8
+/// - "binary" -> Binary
+///
+/// **Date/Time types:**
+/// - "date" -> Extension (stored as I32, days since epoch)
+/// - "timestamp" -> Extension (stored as I64, milliseconds since epoch)
+///
+/// **Numeric types:**
+/// - "decimal" -> Extension (stored as Utf8 for precision)
 ///
 /// # Example
 /// ```ignore
@@ -55,16 +73,7 @@ pub fn metadata_to_dtype(metadata: &Metadata) -> VortexResult<DType> {
             Nullability::Nullable
         };
 
-        let dtype = match field.data_type.as_str() {
-            "integer" => DType::Primitive(PType::I32, nullability),
-            "string" => DType::Utf8(nullability),
-            "boolean" => DType::Bool(nullability),
-            "double" => DType::Primitive(PType::F64, nullability),
-            other => {
-                return Err(format!("Unsupported data type: {}", other).into());
-            }
-        };
-
+        let dtype = vine_type_to_dtype(&field.data_type, nullability)?;
         field_types.push(dtype);
     }
 
@@ -74,6 +83,37 @@ pub fn metadata_to_dtype(metadata: &Metadata) -> VortexResult<DType> {
         struct_fields.into(),
         Nullability::NonNullable,
     ))
+}
+
+/// Convert Vine type string to Vortex DType
+fn vine_type_to_dtype(type_str: &str, nullability: Nullability) -> VortexResult<DType> {
+    match type_str.to_lowercase().as_str() {
+        // Integer types
+        "byte" | "tinyint" => Ok(DType::Primitive(PType::I8, nullability)),
+        "short" | "smallint" => Ok(DType::Primitive(PType::I16, nullability)),
+        "integer" | "int" => Ok(DType::Primitive(PType::I32, nullability)),
+        "long" | "bigint" => Ok(DType::Primitive(PType::I64, nullability)),
+
+        // Floating point types
+        "float" => Ok(DType::Primitive(PType::F32, nullability)),
+        "double" => Ok(DType::Primitive(PType::F64, nullability)),
+
+        // Other primitive types
+        "boolean" | "bool" => Ok(DType::Bool(nullability)),
+        "string" => Ok(DType::Utf8(nullability)),
+        "binary" => Ok(DType::Binary(nullability)),
+
+        // Date/Time types - stored as primitives with semantic meaning
+        // Date: days since Unix epoch (1970-01-01)
+        "date" => Ok(DType::Primitive(PType::I32, nullability)),
+        // Timestamp: milliseconds since Unix epoch
+        "timestamp" => Ok(DType::Primitive(PType::I64, nullability)),
+
+        // Decimal: stored as string for precision preservation
+        "decimal" => Ok(DType::Utf8(nullability)),
+
+        other => Err(format!("Unsupported data type: {}", other).into()),
+    }
 }
 
 /// Convert Vortex DType back to Vine Metadata
@@ -91,23 +131,7 @@ pub fn dtype_to_metadata(dtype: &DType, table_name: &str) -> VortexResult<Metada
                 .map(|(i, name)| {
                     // Get field dtype by looking at the struct's field types
                     let field_dtype = get_field_dtype_by_index(struct_fields, i);
-                    let (data_type, is_required) = match field_dtype {
-                        Some(DType::Primitive(ptype, nullability)) => {
-                            let type_str = match ptype {
-                                PType::I32 | PType::I64 => "integer",
-                                PType::F32 | PType::F64 => "double",
-                                _ => "string",
-                            };
-                            (type_str.to_string(), nullability == Nullability::NonNullable)
-                        }
-                        Some(DType::Utf8(nullability)) => {
-                            ("string".to_string(), nullability == Nullability::NonNullable)
-                        }
-                        Some(DType::Bool(nullability)) => {
-                            ("boolean".to_string(), nullability == Nullability::NonNullable)
-                        }
-                        _ => ("string".to_string(), false),
-                    };
+                    let (data_type, is_required) = dtype_to_vine_type(field_dtype);
 
                     MetadataField {
                         id: (i + 1) as i32,
@@ -121,6 +145,38 @@ pub fn dtype_to_metadata(dtype: &DType, table_name: &str) -> VortexResult<Metada
             Ok(Metadata::new(table_name, fields))
         }
         _ => Err("DType must be a Struct for table schema".into()),
+    }
+}
+
+/// Convert Vortex DType to Vine type string
+fn dtype_to_vine_type(dtype: Option<DType>) -> (String, bool) {
+    match dtype {
+        Some(DType::Primitive(ptype, nullability)) => {
+            let type_str = match ptype {
+                PType::I8 => "byte",
+                PType::I16 => "short",
+                PType::I32 => "integer",
+                PType::I64 => "long",
+                PType::F16 => "float",  // Half precision mapped to float
+                PType::F32 => "float",
+                PType::F64 => "double",
+                PType::U8 => "byte",    // Unsigned mapped to signed equivalent
+                PType::U16 => "short",
+                PType::U32 => "integer",
+                PType::U64 => "long",
+            };
+            (type_str.to_string(), nullability == Nullability::NonNullable)
+        }
+        Some(DType::Utf8(nullability)) => {
+            ("string".to_string(), nullability == Nullability::NonNullable)
+        }
+        Some(DType::Bool(nullability)) => {
+            ("boolean".to_string(), nullability == Nullability::NonNullable)
+        }
+        Some(DType::Binary(nullability)) => {
+            ("binary".to_string(), nullability == Nullability::NonNullable)
+        }
+        _ => ("string".to_string(), false),
     }
 }
 
@@ -139,9 +195,14 @@ pub fn is_compatible_dtype(dtype: &DType) -> bool {
                 if let Some(field_dtype) = struct_fields.field_by_index(i) {
                     let compatible = matches!(
                         field_dtype,
-                        DType::Primitive(PType::I32 | PType::I64 | PType::F32 | PType::F64, _)
-                            | DType::Utf8(_)
-                            | DType::Bool(_)
+                        DType::Primitive(
+                            PType::I8 | PType::I16 | PType::I32 | PType::I64 |
+                            PType::F16 | PType::F32 | PType::F64 |
+                            PType::U8 | PType::U16 | PType::U32 | PType::U64, _
+                        )
+                        | DType::Utf8(_)
+                        | DType::Bool(_)
+                        | DType::Binary(_)
                     );
                     if !compatible {
                         return false;
@@ -242,13 +303,7 @@ fn build_struct_array(metadata: &Metadata, rows: &[&str]) -> VortexResult<ArrayR
             .map(|row| row.get(col_idx).copied().unwrap_or(""))
             .collect();
 
-        let array = match field.data_type.as_str() {
-            "integer" => build_int_array(&values, field.is_required)?,
-            "string" => build_string_array(&values, field.is_required)?,
-            "boolean" => build_bool_array(&values, field.is_required)?,
-            "double" => build_double_array(&values, field.is_required)?,
-            other => return Err(format!("Unsupported type: {}", other).into()),
-        };
+        let array = build_typed_array(&field.data_type, &values)?;
 
         field_arrays.push(array);
     }
@@ -264,36 +319,204 @@ fn build_struct_array(metadata: &Metadata, rows: &[&str]) -> VortexResult<ArrayR
     Ok(struct_array.into_array())
 }
 
-fn build_int_array(values: &[&str], _is_required: bool) -> VortexResult<ArrayRef> {
-    let array: PrimitiveArray = values
-        .iter()
-        .map(|v| v.parse::<i32>().unwrap_or(0))
-        .collect();
-    Ok(array.into_array())
-}
+/// Build typed array from string values based on Vine type
+fn build_typed_array(type_str: &str, values: &[&str]) -> VortexResult<ArrayRef> {
+    match type_str.to_lowercase().as_str() {
+        // Integer types
+        "byte" | "tinyint" => {
+            let array: PrimitiveArray = values
+                .iter()
+                .map(|v| v.parse::<i8>().unwrap_or(0))
+                .collect();
+            Ok(array.into_array())
+        }
+        "short" | "smallint" => {
+            let array: PrimitiveArray = values
+                .iter()
+                .map(|v| v.parse::<i16>().unwrap_or(0))
+                .collect();
+            Ok(array.into_array())
+        }
+        "integer" | "int" => {
+            let array: PrimitiveArray = values
+                .iter()
+                .map(|v| v.parse::<i32>().unwrap_or(0))
+                .collect();
+            Ok(array.into_array())
+        }
+        "long" | "bigint" => {
+            let array: PrimitiveArray = values
+                .iter()
+                .map(|v| v.parse::<i64>().unwrap_or(0))
+                .collect();
+            Ok(array.into_array())
+        }
 
-fn build_string_array(values: &[&str], _is_required: bool) -> VortexResult<ArrayRef> {
-    let mut builder = VarBinViewBuilder::with_capacity(DType::Utf8(Nullability::Nullable), values.len());
-    for v in values {
-        builder.append_value(v.as_bytes());
+        // Floating point types
+        "float" => {
+            let array: PrimitiveArray = values
+                .iter()
+                .map(|v| v.parse::<f32>().unwrap_or(0.0))
+                .collect();
+            Ok(array.into_array())
+        }
+        "double" => {
+            let array: PrimitiveArray = values
+                .iter()
+                .map(|v| v.parse::<f64>().unwrap_or(0.0))
+                .collect();
+            Ok(array.into_array())
+        }
+
+        // Boolean
+        "boolean" | "bool" => {
+            let array: BoolArray = values
+                .iter()
+                .map(|v| matches!(v.to_lowercase().as_str(), "true" | "1" | "yes"))
+                .collect();
+            Ok(array.into_array())
+        }
+
+        // String
+        "string" => {
+            let mut builder = VarBinViewBuilder::with_capacity(
+                DType::Utf8(Nullability::Nullable),
+                values.len(),
+            );
+            for v in values {
+                builder.append_value(v.as_bytes());
+            }
+            Ok(builder.finish().into_array())
+        }
+
+        // Binary (base64 encoded in CSV)
+        "binary" => {
+            let mut builder = VarBinViewBuilder::with_capacity(
+                DType::Binary(Nullability::Nullable),
+                values.len(),
+            );
+            for v in values {
+                // Decode base64 or use raw bytes
+                let bytes = base64_decode(v).unwrap_or_else(|_| v.as_bytes().to_vec());
+                builder.append_value(&bytes);
+            }
+            Ok(builder.finish().into_array())
+        }
+
+        // Date (YYYY-MM-DD format -> days since epoch)
+        "date" => {
+            let array: PrimitiveArray = values
+                .iter()
+                .map(|v| parse_date_to_days(v))
+                .collect();
+            Ok(array.into_array())
+        }
+
+        // Timestamp (ISO format or epoch millis -> milliseconds since epoch)
+        "timestamp" => {
+            let array: PrimitiveArray = values
+                .iter()
+                .map(|v| parse_timestamp_to_millis(v))
+                .collect();
+            Ok(array.into_array())
+        }
+
+        // Decimal (stored as string for precision)
+        "decimal" => {
+            let mut builder = VarBinViewBuilder::with_capacity(
+                DType::Utf8(Nullability::Nullable),
+                values.len(),
+            );
+            for v in values {
+                builder.append_value(v.as_bytes());
+            }
+            Ok(builder.finish().into_array())
+        }
+
+        other => Err(format!("Unsupported type: {}", other).into()),
     }
-    Ok(builder.finish().into_array())
 }
 
-fn build_bool_array(values: &[&str], _is_required: bool) -> VortexResult<ArrayRef> {
-    let array: BoolArray = values
-        .iter()
-        .map(|v| matches!(v.to_lowercase().as_str(), "true" | "1" | "yes"))
-        .collect();
-    Ok(array.into_array())
+/// Parse date string (YYYY-MM-DD) to days since Unix epoch
+fn parse_date_to_days(s: &str) -> i32 {
+    use chrono::NaiveDate;
+    let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+    NaiveDate::parse_from_str(s, "%Y-%m-%d")
+        .map(|d| (d - epoch).num_days() as i32)
+        .unwrap_or(0)
 }
 
-fn build_double_array(values: &[&str], _is_required: bool) -> VortexResult<ArrayRef> {
-    let array: PrimitiveArray = values
-        .iter()
-        .map(|v| v.parse::<f64>().unwrap_or(0.0))
-        .collect();
-    Ok(array.into_array())
+/// Parse timestamp string to milliseconds since Unix epoch
+fn parse_timestamp_to_millis(s: &str) -> i64 {
+    use chrono::{DateTime, NaiveDateTime};
+
+    // Try parsing as epoch milliseconds first
+    if let Ok(millis) = s.parse::<i64>() {
+        return millis;
+    }
+
+    // Try ISO 8601 format with timezone
+    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+        return dt.timestamp_millis();
+    }
+
+    // Try common formats without timezone
+    let formats = [
+        "%Y-%m-%d %H:%M:%S%.f",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S%.f",
+        "%Y-%m-%dT%H:%M:%S",
+    ];
+
+    for fmt in &formats {
+        if let Ok(dt) = NaiveDateTime::parse_from_str(s, fmt) {
+            return dt.and_utc().timestamp_millis();
+        }
+    }
+
+    0
+}
+
+/// Simple base64 decode (for binary data in CSV)
+fn base64_decode(s: &str) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+    // Simple base64 decoding without external dependency
+    const DECODE_TABLE: [i8; 128] = [
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 62, -1, -1, -1, 63,
+        52, 53, 54, 55, 56, 57, 58, 59, 60, 61, -1, -1, -1, -1, -1, -1,
+        -1,  0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14,
+        15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, -1, -1, -1, -1, -1,
+        -1, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+        41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, -1, -1, -1, -1, -1,
+    ];
+
+    let input = s.trim().as_bytes();
+    let mut output = Vec::with_capacity(input.len() * 3 / 4);
+    let mut buf = 0u32;
+    let mut buf_len = 0;
+
+    for &byte in input {
+        if byte == b'=' {
+            break;
+        }
+        if byte >= 128 {
+            return Err("Invalid base64 character".into());
+        }
+        let val = DECODE_TABLE[byte as usize];
+        if val < 0 {
+            continue; // Skip whitespace
+        }
+        buf = (buf << 6) | (val as u32);
+        buf_len += 6;
+        if buf_len >= 8 {
+            buf_len -= 8;
+            output.push((buf >> buf_len) as u8);
+            buf &= (1 << buf_len) - 1;
+        }
+    }
+
+    Ok(output)
 }
 
 /// Read data from a Vortex file
@@ -344,6 +567,186 @@ pub fn get_row_count(array: &ArrayRef) -> usize {
     array.len()
 }
 
+/// Extract column values as strings based on type
+fn extract_column_values(child: &ArrayRef, type_str: &str, num_rows: usize) -> Vec<String> {
+    use vortex::ToCanonical;
+
+    match type_str.to_lowercase().as_str() {
+        // Integer types
+        "byte" | "tinyint" => {
+            let prim = child.to_primitive();
+            (0..num_rows)
+                .map(|i| {
+                    let val: i8 = prim.scalar_at(i).as_ref().try_into().unwrap_or(0);
+                    val.to_string()
+                })
+                .collect()
+        }
+        "short" | "smallint" => {
+            let prim = child.to_primitive();
+            (0..num_rows)
+                .map(|i| {
+                    let val: i16 = prim.scalar_at(i).as_ref().try_into().unwrap_or(0);
+                    val.to_string()
+                })
+                .collect()
+        }
+        "integer" | "int" => {
+            let prim = child.to_primitive();
+            (0..num_rows)
+                .map(|i| {
+                    let val: i32 = prim.scalar_at(i).as_ref().try_into().unwrap_or(0);
+                    val.to_string()
+                })
+                .collect()
+        }
+        "long" | "bigint" => {
+            let prim = child.to_primitive();
+            (0..num_rows)
+                .map(|i| {
+                    let val: i64 = prim.scalar_at(i).as_ref().try_into().unwrap_or(0);
+                    val.to_string()
+                })
+                .collect()
+        }
+
+        // Floating point types
+        "float" => {
+            let prim = child.to_primitive();
+            (0..num_rows)
+                .map(|i| {
+                    let val: f32 = prim.scalar_at(i).as_ref().try_into().unwrap_or(0.0);
+                    val.to_string()
+                })
+                .collect()
+        }
+        "double" => {
+            let prim = child.to_primitive();
+            (0..num_rows)
+                .map(|i| {
+                    let val: f64 = prim.scalar_at(i).as_ref().try_into().unwrap_or(0.0);
+                    val.to_string()
+                })
+                .collect()
+        }
+
+        // Boolean
+        "boolean" | "bool" => {
+            let bool_arr = child.to_bool();
+            (0..num_rows)
+                .map(|i| {
+                    let val: bool = bool_arr.scalar_at(i).as_ref().try_into().unwrap_or(false);
+                    val.to_string()
+                })
+                .collect()
+        }
+
+        // String and Decimal (both stored as UTF8)
+        "string" | "decimal" => {
+            (0..num_rows)
+                .map(|i| {
+                    let scalar = child.scalar_at(i);
+                    scalar.as_utf8().value().map(|s| s.to_string()).unwrap_or_default()
+                })
+                .collect()
+        }
+
+        // Binary (base64 encode for CSV)
+        "binary" => {
+            (0..num_rows)
+                .map(|i| {
+                    let scalar = child.scalar_at(i);
+                    if let Some(bytes) = scalar.as_binary().value() {
+                        base64_encode(&bytes)
+                    } else {
+                        String::new()
+                    }
+                })
+                .collect()
+        }
+
+        // Date (days since epoch -> YYYY-MM-DD)
+        "date" => {
+            let prim = child.to_primitive();
+            (0..num_rows)
+                .map(|i| {
+                    let days: i32 = prim.scalar_at(i).as_ref().try_into().unwrap_or(0);
+                    days_to_date_string(days)
+                })
+                .collect()
+        }
+
+        // Timestamp (millis since epoch -> ISO format)
+        "timestamp" => {
+            let prim = child.to_primitive();
+            (0..num_rows)
+                .map(|i| {
+                    let millis: i64 = prim.scalar_at(i).as_ref().try_into().unwrap_or(0);
+                    millis_to_timestamp_string(millis)
+                })
+                .collect()
+        }
+
+        // Fallback
+        _ => (0..num_rows).map(|_| String::new()).collect(),
+    }
+}
+
+/// Convert days since epoch to date string (YYYY-MM-DD)
+fn days_to_date_string(days: i32) -> String {
+    use chrono::NaiveDate;
+    let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+    if let Some(date) = epoch.checked_add_signed(chrono::Duration::days(days as i64)) {
+        date.format("%Y-%m-%d").to_string()
+    } else {
+        "1970-01-01".to_string()
+    }
+}
+
+/// Convert milliseconds since epoch to timestamp string
+fn millis_to_timestamp_string(millis: i64) -> String {
+    use chrono::{TimeZone, Utc};
+    if let Some(dt) = Utc.timestamp_millis_opt(millis).single() {
+        dt.format("%Y-%m-%d %H:%M:%S%.3f").to_string()
+    } else {
+        "1970-01-01 00:00:00.000".to_string()
+    }
+}
+
+/// Simple base64 encode (for binary data in CSV)
+fn base64_encode(bytes: &[u8]) -> String {
+    const ENCODE_TABLE: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    let mut result = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    let mut i = 0;
+
+    while i + 2 < bytes.len() {
+        let n = ((bytes[i] as u32) << 16) | ((bytes[i + 1] as u32) << 8) | (bytes[i + 2] as u32);
+        result.push(ENCODE_TABLE[((n >> 18) & 0x3F) as usize] as char);
+        result.push(ENCODE_TABLE[((n >> 12) & 0x3F) as usize] as char);
+        result.push(ENCODE_TABLE[((n >> 6) & 0x3F) as usize] as char);
+        result.push(ENCODE_TABLE[(n & 0x3F) as usize] as char);
+        i += 3;
+    }
+
+    if i + 1 == bytes.len() {
+        let n = (bytes[i] as u32) << 16;
+        result.push(ENCODE_TABLE[((n >> 18) & 0x3F) as usize] as char);
+        result.push(ENCODE_TABLE[((n >> 12) & 0x3F) as usize] as char);
+        result.push('=');
+        result.push('=');
+    } else if i + 2 == bytes.len() {
+        let n = ((bytes[i] as u32) << 16) | ((bytes[i + 1] as u32) << 8);
+        result.push(ENCODE_TABLE[((n >> 18) & 0x3F) as usize] as char);
+        result.push(ENCODE_TABLE[((n >> 12) & 0x3F) as usize] as char);
+        result.push(ENCODE_TABLE[((n >> 6) & 0x3F) as usize] as char);
+        result.push('=');
+    }
+
+    result
+}
+
 /// Convert ArrayRef to CSV-formatted rows for JNI compatibility
 ///
 /// This is the reverse of build_struct_array - extracts data from Vortex arrays
@@ -365,46 +768,7 @@ pub fn array_to_csv_rows(array: &ArrayRef, metadata: &Metadata) -> VortexResult<
         let child = fields.get(col_idx)
             .ok_or_else(|| format!("Missing field at index {}", col_idx))?;
 
-        let values: Vec<String> = match field.data_type.as_str() {
-            "integer" => {
-                let prim = child.to_primitive();
-                (0..num_rows)
-                    .map(|i| {
-                        let val: i32 = prim.scalar_at(i).as_ref().try_into().unwrap_or(0);
-                        val.to_string()
-                    })
-                    .collect()
-            }
-            "string" => {
-                (0..num_rows)
-                    .map(|i| {
-                        let scalar = child.scalar_at(i);
-                        scalar.as_utf8().value().map(|s| s.to_string()).unwrap_or_default()
-                    })
-                    .collect()
-            }
-            "boolean" => {
-                let bool_arr = child.to_bool();
-                (0..num_rows)
-                    .map(|i| {
-                        let val: bool = bool_arr.scalar_at(i).as_ref().try_into().unwrap_or(false);
-                        val.to_string()
-                    })
-                    .collect()
-            }
-            "double" => {
-                let prim = child.to_primitive();
-                (0..num_rows)
-                    .map(|i| {
-                        let val: f64 = prim.scalar_at(i).as_ref().try_into().unwrap_or(0.0);
-                        val.to_string()
-                    })
-                    .collect()
-            }
-            _ => {
-                (0..num_rows).map(|_| String::new()).collect()
-            }
-        };
+        let values = extract_column_values(child, &field.data_type, num_rows);
         column_values.push(values);
     }
 
@@ -642,13 +1006,129 @@ mod tests {
     }
 
     #[test]
+    fn test_extended_types() {
+        // Test all new types: byte, short, long, float, date, timestamp, binary, decimal
+        let metadata = Metadata::new(
+            "extended_types",
+            vec![
+                MetadataField { id: 1, name: "byte_col".to_string(), data_type: "byte".to_string(), is_required: true },
+                MetadataField { id: 2, name: "short_col".to_string(), data_type: "short".to_string(), is_required: true },
+                MetadataField { id: 3, name: "long_col".to_string(), data_type: "long".to_string(), is_required: true },
+                MetadataField { id: 4, name: "float_col".to_string(), data_type: "float".to_string(), is_required: true },
+                MetadataField { id: 5, name: "date_col".to_string(), data_type: "date".to_string(), is_required: false },
+                MetadataField { id: 6, name: "timestamp_col".to_string(), data_type: "timestamp".to_string(), is_required: false },
+                MetadataField { id: 7, name: "decimal_col".to_string(), data_type: "decimal".to_string(), is_required: false },
+            ],
+        );
+
+        let dtype = metadata_to_dtype(&metadata).expect("Should convert extended types");
+
+        if let DType::Struct(struct_fields, _) = &dtype {
+            assert_eq!(struct_fields.names().len(), 7);
+
+            // Verify byte -> I8
+            assert!(matches!(
+                get_field_dtype_by_index(struct_fields, 0),
+                Some(DType::Primitive(PType::I8, Nullability::NonNullable))
+            ));
+
+            // Verify short -> I16
+            assert!(matches!(
+                get_field_dtype_by_index(struct_fields, 1),
+                Some(DType::Primitive(PType::I16, Nullability::NonNullable))
+            ));
+
+            // Verify long -> I64
+            assert!(matches!(
+                get_field_dtype_by_index(struct_fields, 2),
+                Some(DType::Primitive(PType::I64, Nullability::NonNullable))
+            ));
+
+            // Verify float -> F32
+            assert!(matches!(
+                get_field_dtype_by_index(struct_fields, 3),
+                Some(DType::Primitive(PType::F32, Nullability::NonNullable))
+            ));
+
+            // Verify date -> I32 (days since epoch)
+            assert!(matches!(
+                get_field_dtype_by_index(struct_fields, 4),
+                Some(DType::Primitive(PType::I32, Nullability::Nullable))
+            ));
+
+            // Verify timestamp -> I64 (millis since epoch)
+            assert!(matches!(
+                get_field_dtype_by_index(struct_fields, 5),
+                Some(DType::Primitive(PType::I64, Nullability::Nullable))
+            ));
+
+            // Verify decimal -> Utf8
+            assert!(matches!(
+                get_field_dtype_by_index(struct_fields, 6),
+                Some(DType::Utf8(Nullability::Nullable))
+            ));
+        }
+
+        println!("[TEST] Extended types verification successful");
+    }
+
+    #[test]
+    fn test_date_timestamp_parsing() {
+        // Test date parsing
+        assert_eq!(parse_date_to_days("1970-01-01"), 0);
+        assert_eq!(parse_date_to_days("1970-01-02"), 1);
+        assert_eq!(parse_date_to_days("2024-01-01"), 19723); // Days from 1970 to 2024
+
+        // Test timestamp parsing
+        assert_eq!(parse_timestamp_to_millis("0"), 0);
+        assert_eq!(parse_timestamp_to_millis("1000"), 1000);
+
+        // ISO format
+        let ts = parse_timestamp_to_millis("2024-01-01T00:00:00Z");
+        assert!(ts > 0, "Should parse ISO format");
+
+        // Datetime format
+        let ts2 = parse_timestamp_to_millis("2024-01-01 12:30:45");
+        assert!(ts2 > 0, "Should parse datetime format");
+
+        println!("[TEST] Date/timestamp parsing successful");
+    }
+
+    #[test]
+    fn test_type_aliases() {
+        // Test that aliases work: tinyint=byte, smallint=short, bigint=long, int=integer, bool=boolean
+        let metadata = Metadata::new(
+            "aliases",
+            vec![
+                MetadataField { id: 1, name: "a".to_string(), data_type: "tinyint".to_string(), is_required: true },
+                MetadataField { id: 2, name: "b".to_string(), data_type: "smallint".to_string(), is_required: true },
+                MetadataField { id: 3, name: "c".to_string(), data_type: "bigint".to_string(), is_required: true },
+                MetadataField { id: 4, name: "d".to_string(), data_type: "int".to_string(), is_required: true },
+                MetadataField { id: 5, name: "e".to_string(), data_type: "bool".to_string(), is_required: true },
+            ],
+        );
+
+        let dtype = metadata_to_dtype(&metadata).expect("Should convert aliases");
+
+        if let DType::Struct(struct_fields, _) = &dtype {
+            assert!(matches!(get_field_dtype_by_index(struct_fields, 0), Some(DType::Primitive(PType::I8, _))));
+            assert!(matches!(get_field_dtype_by_index(struct_fields, 1), Some(DType::Primitive(PType::I16, _))));
+            assert!(matches!(get_field_dtype_by_index(struct_fields, 2), Some(DType::Primitive(PType::I64, _))));
+            assert!(matches!(get_field_dtype_by_index(struct_fields, 3), Some(DType::Primitive(PType::I32, _))));
+            assert!(matches!(get_field_dtype_by_index(struct_fields, 4), Some(DType::Bool(_))));
+        }
+
+        println!("[TEST] Type aliases verification successful");
+    }
+
+    #[test]
     fn test_unsupported_type() {
         let metadata = Metadata::new(
             "test",
             vec![MetadataField {
                 id: 1,
                 name: "unknown".to_string(),
-                data_type: "timestamp".to_string(), // Not supported yet
+                data_type: "map".to_string(), // Complex types not supported
                 is_required: true,
             }],
         );
