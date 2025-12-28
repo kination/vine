@@ -8,6 +8,10 @@ pub mod storage_writer;
 pub mod reader_cache;
 pub mod storage_reader;
 
+// Vortex experiment module (optional feature)
+#[cfg(feature = "vortex-exp")]
+pub mod vortex_exp;
+
 use std::ffi::CString;
 
 use jni::JNIEnv;

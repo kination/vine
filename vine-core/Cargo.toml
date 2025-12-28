@@ -11,6 +11,14 @@ chrono = "0.4"
 jni = "0.21.1"
 lazy_static = "1.4"
 
+# Vortex experiment (optional feature)
+# Only vortex-dtype is needed for schema conversion experiments
+vortex-dtype = { version = "0.56.0", optional = true }
+
+[features]
+default = []
+vortex-exp = ["vortex-dtype"]
+
 [dev-dependencies]
 tempfile = "3.8"
 
