@@ -34,11 +34,6 @@ lazy_static::lazy_static! {
 // ============================================================================
 // Reader JNI Functions
 // ============================================================================
-
-/// Read data from Vine storage
-///
-/// Caching is handled internally by vine-core.
-/// External modules (vine-spark, vine-trino) don't need to manage cache.
 #[no_mangle]
 #[allow(non_snake_case)]
 #[allow(unused_variables)]
@@ -70,10 +65,6 @@ pub extern "C" fn Java_io_kination_vine_VineModule_readDataFromVine(
 // ============================================================================
 // Batch Writer JNI Functions
 // ============================================================================
-
-/// Legacy batch write function (backward compatible)
-///
-/// Caching is handled internally by vine-core.
 #[no_mangle]
 #[allow(non_snake_case)]
 #[allow(unused_variables)]
@@ -143,10 +134,7 @@ pub extern "C" fn Java_io_kination_vine_VineModule_batchWriteHighCompression(
 // ============================================================================
 // Streaming Writer JNI Functions
 // ============================================================================
-
 /// Create a new streaming writer and return its ID
-///
-/// Caching is handled internally by VineStreamingWriter.
 #[no_mangle]
 #[allow(non_snake_case)]
 #[allow(unused_variables)]
