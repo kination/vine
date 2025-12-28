@@ -1,8 +1,8 @@
+
 use crate::metadata::Metadata;
 use std::path::PathBuf;
 
-/// Caching 'reader metadata'/'schema information'
-/// Prevent frequent metadata parsing and ensures consistency with 'writer'
+/// Caching reader metadata/schema information
 pub struct ReaderCache {
     pub metadata: Metadata,
     pub base_path: PathBuf,
@@ -12,11 +12,7 @@ impl ReaderCache {
     /// Create new reader cache from base directory
     pub fn new(base_path: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
         let meta_path = base_path.join("vine_meta.json");
-        let meta_str = std::fs::read_to_string(&meta_path)
-            .map_err(|e| format!("Failed to read metadata from {:?}: {}", meta_path, e))?;
-
-        let metadata: Metadata = serde_json::from_str(&meta_str)
-            .map_err(|e| format!("Failed to parse metadata: {}", e))?;
+        let metadata = Metadata::load(&meta_path)?;
 
         // Validate metadata
         if metadata.fields.is_empty() {
@@ -46,16 +42,12 @@ impl ReaderCache {
         Ok(())
     }
 
-    // ========================================================================
-    // Schema-on-Read Functions
-    // ========================================================================
-
     /// Create reader cache with schema-on-read fallback
     ///
     /// Tries multiple sources in order:
     /// 1. vine_meta.json (traditional)
     /// 2. _meta/schema.json (cache)
-    /// 3. Infer from Parquet files
+    /// 3. Infer from Vortex files
     pub fn new_with_fallback(base_path: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
         // Option 1: vine_meta.json (traditional, highest priority)
         let meta_path = base_path.join("vine_meta.json");
@@ -75,8 +67,8 @@ impl ReaderCache {
             });
         }
 
-        // Option 3: Infer from Parquet files
-        let metadata = Metadata::infer_from_parquet(&base_path)?;
+        // Option 3: Infer from Vortex files
+        let metadata = Metadata::infer_from_vortex(&base_path)?;
 
         // Optionally save to cache for future reads (async, non-blocking)
         let cache_path = base_path.clone();

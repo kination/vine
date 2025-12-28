@@ -1,21 +1,17 @@
-//! Vortex Experiment Module
+//! Vortex Storage Module
 //!
-//! This module contains experimental code for evaluating Apache Vortex
-//! as a potential alternative to Parquet for the Vine datalake format.
+//! This module provides Vortex-based file I/O for the Vine datalake format.
+//! Vortex replaces Parquet as the primary storage format.
 //!
-//! Enable with: cargo build --features vortex-exp
+//! # Features
+//! - DType conversion between Vine metadata and Vortex
+//! - File read/write with date partitioning
+//! - CSV ↔ Vortex array conversion for JNI compatibility
 //!
 //! # Testing
 //! ```bash
-//! cargo test --features vortex-exp vortex_exp
+//! cargo test vortex_exp
 //! ```
-//!
-//! # Current Status
-//! - Phase 1: DType conversion (vine_meta.json <-> Vortex DType) - DONE
-//! - Phase 2: File I/O - IN PROGRESS
-//! - Phase 3: JNI integration (pending)
-
-#![cfg(feature = "vortex-exp")]
 
 use std::path::Path;
 
@@ -356,6 +352,180 @@ pub async fn read_vortex_file_async<P: AsRef<Path>>(path: P) -> VortexResult<(DT
 /// Get row count from an array
 pub fn get_row_count(array: &ArrayRef) -> usize {
     array.len()
+}
+
+/// Convert ArrayRef to CSV-formatted rows for JNI compatibility
+///
+/// This is the reverse of build_struct_array - extracts data from Vortex arrays
+/// and converts back to CSV format for JNI layer.
+pub fn array_to_csv_rows(array: &ArrayRef, metadata: &Metadata) -> VortexResult<Vec<String>> {
+    use vortex::ToCanonical;
+
+    let struct_array = array.to_struct();
+    let num_rows = struct_array.len();
+    let mut rows = Vec::with_capacity(num_rows);
+
+    // Extract each column as canonical array for value access
+    let mut column_values: Vec<Vec<String>> = Vec::with_capacity(metadata.fields.len());
+
+    // Get all fields from StructArray
+    let fields = struct_array.fields();
+
+    for (col_idx, field) in metadata.fields.iter().enumerate() {
+        let child = fields.get(col_idx)
+            .ok_or_else(|| format!("Missing field at index {}", col_idx))?;
+
+        let values: Vec<String> = match field.data_type.as_str() {
+            "integer" => {
+                let prim = child.to_primitive();
+                (0..num_rows)
+                    .map(|i| {
+                        let val: i32 = prim.scalar_at(i).as_ref().try_into().unwrap_or(0);
+                        val.to_string()
+                    })
+                    .collect()
+            }
+            "string" => {
+                (0..num_rows)
+                    .map(|i| {
+                        let scalar = child.scalar_at(i);
+                        scalar.as_utf8().value().map(|s| s.to_string()).unwrap_or_default()
+                    })
+                    .collect()
+            }
+            "boolean" => {
+                let bool_arr = child.to_bool();
+                (0..num_rows)
+                    .map(|i| {
+                        let val: bool = bool_arr.scalar_at(i).as_ref().try_into().unwrap_or(false);
+                        val.to_string()
+                    })
+                    .collect()
+            }
+            "double" => {
+                let prim = child.to_primitive();
+                (0..num_rows)
+                    .map(|i| {
+                        let val: f64 = prim.scalar_at(i).as_ref().try_into().unwrap_or(0.0);
+                        val.to_string()
+                    })
+                    .collect()
+            }
+            _ => {
+                (0..num_rows).map(|_| String::new()).collect()
+            }
+        };
+        column_values.push(values);
+    }
+
+    // Transpose: column-oriented -> row-oriented
+    for row_idx in 0..num_rows {
+        let row: Vec<String> = column_values.iter()
+            .map(|col| col[row_idx].clone())
+            .collect();
+        rows.push(row.join(","));
+    }
+
+    Ok(rows)
+}
+
+/// Read all Vortex files from a directory and return CSV rows
+///
+/// Scans date-partitioned directories (YYYY-MM-DD format) and reads all .vtx files.
+/// Returns data as CSV-formatted strings for JNI compatibility.
+pub fn read_vine_vortex_data(dir_path: &str) -> VortexResult<Vec<String>> {
+    use std::fs;
+    use std::path::PathBuf;
+    use chrono::NaiveDate;
+
+    let base_path = PathBuf::from(dir_path);
+
+    // Load metadata from vine_meta.json
+    let meta_path = base_path.join("vine_meta.json");
+    let metadata = Metadata::load(&meta_path)
+        .map_err(|e| format!("Failed to load metadata: {}", e))?;
+
+    let mut all_rows = Vec::new();
+    let mut directories = Vec::new();
+
+    // Scan for date-partitioned directories
+    let dir_entries = fs::read_dir(&base_path)
+        .map_err(|e| format!("Cannot read directory {:?}: {}", base_path, e))?;
+
+    for entry_result in dir_entries {
+        let entry = entry_result.map_err(|e| format!("Cannot read entry: {}", e))?;
+        let path = entry.path();
+
+        if path.is_dir() {
+            if let Some(dir_name) = path.file_name().and_then(|s| s.to_str()) {
+                if let Ok(date) = NaiveDate::parse_from_str(dir_name, "%Y-%m-%d") {
+                    directories.push((date, path));
+                }
+            }
+        }
+    }
+
+    // Sort directories by date
+    directories.sort_by_key(|(date, _)| *date);
+
+    // Read all Vortex files from date directories
+    for (_, dir_path) in directories {
+        let sub_dir = fs::read_dir(&dir_path)
+            .map_err(|e| format!("Cannot read directory {:?}: {}", dir_path, e))?;
+
+        for file_entry_result in sub_dir {
+            let file_path = file_entry_result
+                .map_err(|e| format!("Cannot read file entry: {}", e))?
+                .path();
+
+            // Process .vtx files only
+            if file_path.extension().map_or(false, |ext| ext == "vtx") {
+                match read_vortex_file(&file_path) {
+                    Ok((_, array)) => {
+                        match array_to_csv_rows(&array, &metadata) {
+                            Ok(rows) => all_rows.extend(rows),
+                            Err(e) => eprintln!("Warning: Failed to convert {:?}: {}", file_path, e),
+                        }
+                    }
+                    Err(e) => eprintln!("Warning: Failed to read {:?}: {}", file_path, e),
+                }
+            }
+        }
+    }
+
+    Ok(all_rows)
+}
+
+/// Write data to Vortex format with date partitioning
+///
+/// Creates date-partitioned directory structure and writes data as .vtx files.
+/// Compatible with existing Vine storage layout.
+pub fn write_vine_vortex_data<P: AsRef<Path>>(
+    base_path: P,
+    rows: &[&str],
+) -> VortexResult<u64> {
+    use std::fs;
+    use chrono::Local;
+
+    let base = base_path.as_ref();
+
+    // Load metadata
+    let meta_path = base.join("vine_meta.json");
+    let metadata = Metadata::load(&meta_path)
+        .map_err(|e| format!("Failed to load metadata: {}", e))?;
+
+    // Create date partition directory
+    let date_str = Local::now().format("%Y-%m-%d").to_string();
+    let partition_dir = base.join(&date_str);
+    fs::create_dir_all(&partition_dir)
+        .map_err(|e| format!("Failed to create partition dir: {}", e))?;
+
+    // Generate filename with microsecond precision
+    let timestamp = Local::now().format("%H%M%S_%f").to_string();
+    let file_path = partition_dir.join(format!("data_{}.vtx", timestamp));
+
+    // Write using existing function
+    write_vortex_file(&file_path, &metadata, rows)
 }
 
 #[cfg(test)]

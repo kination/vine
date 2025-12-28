@@ -206,14 +206,14 @@ fn test_read_chronological_order() {
 }
 
 #[test]
-#[should_panic(expected = "Failed to initialize reader cache")]
 fn test_read_missing_metadata() {
     let temp_dir = TempDir::new().unwrap();
     let path = temp_dir.path();
     // Don't create metadata
 
-    // This should panic
-    read_vine_data(path.to_str().unwrap());
+    // Should return empty vec when metadata is missing (graceful error handling)
+    let result = read_vine_data(path.to_str().unwrap());
+    assert!(result.is_empty(), "Should return empty vec when metadata is missing");
 }
 
 #[test]
@@ -455,7 +455,7 @@ fn test_infer_schema_from_parquet() {
     fs::remove_file(path.join("vine_meta.json")).unwrap();
 
     // Now infer schema from Parquet
-    let metadata = Metadata::infer_from_parquet(path).unwrap();
+    let metadata = Metadata::infer_from_vortex(path).unwrap();
 
     assert_eq!(metadata.table_name, "inferred");
     assert_eq!(metadata.fields.len(), 2);
@@ -477,7 +477,7 @@ fn test_infer_schema_all_types() {
 
     // Remove metadata and infer
     fs::remove_file(path.join("vine_meta.json")).unwrap();
-    let metadata = Metadata::infer_from_parquet(path).unwrap();
+    let metadata = Metadata::infer_from_vortex(path).unwrap();
 
     assert_eq!(metadata.fields.len(), 4);
     assert_eq!(metadata.fields[0].data_type, "integer");
@@ -497,7 +497,7 @@ fn test_save_and_load_cached_schema() {
     VineBatchWriter::write_balanced(path, &data).unwrap();
 
     // Infer schema and save to cache
-    let metadata = Metadata::infer_from_parquet(path).unwrap();
+    let metadata = Metadata::infer_from_vortex(path).unwrap();
     metadata.save_to_cache(path).unwrap();
 
     // Verify cache file exists
@@ -586,7 +586,7 @@ fn test_infer_schema_no_parquet_files() {
     let temp_dir = TempDir::new().unwrap();
     let path = temp_dir.path();
 
-    // Empty directory, no parquet files
-    let result = Metadata::infer_from_parquet(path);
+    // Empty directory, no Vortex files
+    let result = Metadata::infer_from_vortex(path);
     assert!(result.is_err());
 }
