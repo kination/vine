@@ -22,6 +22,20 @@ pub struct WriterConfig {
 
     /// Maximum file size in bytes before rolling to new file (default: 256MB)
     pub max_file_size: usize,
+
+    /// Enable async metadata cache updates (default: false for max write speed)
+    ///
+    /// When true, metadata will be asynchronously updated in _meta/schema.json
+    /// after writes complete. This provides read optimization without impacting
+    /// write performance.
+    pub enable_metadata_cache: bool,
+
+    /// Require vine_meta.json file (default: false for schema-on-read)
+    ///
+    /// When false, schema is inferred from Parquet files, eliminating metadata
+    /// I/O from the write path. When true, vine_meta.json must exist and will
+    /// be validated before writing.
+    pub require_metadata_file: bool,
 }
 
 impl Default for WriterConfig {
@@ -39,6 +53,10 @@ impl Default for WriterConfig {
             enable_statistics: false,
             // 256MB max file size for better parallelism on read
             max_file_size: 256 * 1024 * 1024,
+            // Enable async cache for read optimization
+            enable_metadata_cache: true,
+            // Schema-on-read: no metadata file required
+            require_metadata_file: false,
         }
     }
 }
@@ -53,6 +71,10 @@ impl WriterConfig {
             enable_dictionary: false,
             enable_statistics: false,
             max_file_size: 512 * 1024 * 1024,
+            // Disable metadata cache for maximum write speed
+            enable_metadata_cache: false,
+            // Schema-on-read: no metadata file required
+            require_metadata_file: false,
         }
     }
 
@@ -70,6 +92,10 @@ impl WriterConfig {
             enable_dictionary: true,
             enable_statistics: true,
             max_file_size: 128 * 1024 * 1024,
+            // Enable cache for read optimization
+            enable_metadata_cache: true,
+            // Schema-on-read: no metadata file required
+            require_metadata_file: false,
         }
     }
 

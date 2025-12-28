@@ -69,4 +69,46 @@ impl WriterCache {
 
         Ok(())
     }
+
+    // ========================================================================
+    // Schema-on-Write Optional Functions (Skeleton - TODO: Implement)
+    // ========================================================================
+
+    /// Create cache optionally (returns None if metadata file not found)
+    ///
+    /// This enables schema-on-read pattern where metadata file is optional.
+    ///
+    /// # Implementation TODO
+    /// 1. Try to load metadata
+    /// 2. Return Some(cache) if successful
+    /// 3. Return None if file not found (not an error!)
+    pub fn new_optional(base_path: PathBuf) -> Option<Self> {
+        // TODO: Implement optional loading
+        // Self::new(base_path).ok()
+        Self::new(base_path).ok()
+    }
+
+    /// Create cache from explicit schema (no metadata file needed)
+    ///
+    /// This allows writing Parquet files without vine_meta.json.
+    ///
+    /// # Arguments
+    /// * `base_path` - Root directory
+    /// * `metadata` - Explicit metadata to use
+    ///
+    /// # Implementation TODO
+    /// 1. Build Parquet schema from metadata
+    /// 2. Return cache without reading any files
+    pub fn from_metadata(
+        base_path: PathBuf,
+        metadata: Metadata,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        // TODO: Implement construction from explicit metadata
+        let schema = Self::build_schema(&metadata)?;
+        Ok(Self {
+            metadata,
+            schema,
+            base_path,
+        })
+    }
 }
