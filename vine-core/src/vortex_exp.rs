@@ -12,12 +12,26 @@
 //!
 //! # Current Status
 //! - Phase 1: DType conversion (vine_meta.json <-> Vortex DType) - DONE
-//! - Phase 2: File I/O (pending - requires stable Vortex API)
+//! - Phase 2: File I/O - IN PROGRESS
 //! - Phase 3: JNI integration (pending)
 
 #![cfg(feature = "vortex-exp")]
 
+use std::path::Path;
+
+use futures::StreamExt;
+use tokio::runtime::Runtime;
+use vortex::arrays::{BoolArray, PrimitiveArray, StructArray};
+use vortex::builders::{ArrayBuilder, VarBinViewBuilder};
+use vortex::io::session::RuntimeSessionExt;
+use vortex::session::VortexSession;
+use vortex::validity::Validity;
+use vortex::{Array, ArrayRef, IntoArray};
+use vortex::VortexSessionDefault;
 use vortex_dtype::{DType, FieldName, FieldNames, Nullability, PType, StructFields};
+
+// File I/O traits from vortex_file (re-exported through vortex::file)
+use vortex::file::{OpenOptionsSessionExt, WriteOptionsSessionExt};
 
 use crate::metadata::{Metadata, MetadataField};
 
@@ -157,6 +171,191 @@ pub fn is_compatible_dtype(dtype: &DType) -> bool {
 /// Get Vortex version info for documentation
 pub fn vortex_version() -> &'static str {
     "0.56.0"
+}
+
+// ============================================================================
+// Phase 2: File I/O Functions
+// ============================================================================
+
+/// Create a Vortex session with default settings
+///
+/// Note: This should be called from within a tokio runtime context
+/// (e.g., inside `#[tokio::main]` or `#[tokio::test]`)
+pub fn create_session() -> VortexSession {
+    // Use VortexSessionDefault trait to get a fully initialized session
+    VortexSession::default().with_tokio()
+}
+
+/// Write data to a Vortex file
+///
+/// # Arguments
+/// * `path` - Output file path
+/// * `metadata` - Vine metadata schema
+/// * `rows` - Data rows as CSV-like strings (comma-separated values)
+///
+/// # Example
+/// ```ignore
+/// let metadata = Metadata::new("test", vec![
+///     MetadataField { id: 1, name: "id".into(), data_type: "integer".into(), is_required: true },
+///     MetadataField { id: 2, name: "name".into(), data_type: "string".into(), is_required: false },
+/// ]);
+/// write_vortex_file("output.vtx", &metadata, &["1,Alice", "2,Bob"]).unwrap();
+/// ```
+pub fn write_vortex_file<P: AsRef<Path>>(
+    path: P,
+    metadata: &Metadata,
+    rows: &[&str],
+) -> VortexResult<u64> {
+    let rt = Runtime::new()?;
+    rt.block_on(write_vortex_file_async(path, metadata, rows))
+}
+
+/// Async implementation of Vortex file writing
+pub async fn write_vortex_file_async<P: AsRef<Path>>(
+    path: P,
+    metadata: &Metadata,
+    rows: &[&str],
+) -> VortexResult<u64> {
+    let session = create_session();
+
+    // Build arrays from rows based on metadata schema
+    let array = build_struct_array(metadata, rows)?;
+
+    // Create file and write using async_fs::File which implements VortexWrite
+    let file = async_fs::File::create(path.as_ref()).await?;
+    let write_options = session.write_options();
+
+    // Convert array to stream and write
+    let stream = array.to_array_stream();
+    let summary = write_options.write(file, stream).await?;
+
+    Ok(summary.size())
+}
+
+/// Build a StructArray from rows based on metadata schema
+fn build_struct_array(metadata: &Metadata, rows: &[&str]) -> VortexResult<ArrayRef> {
+    if metadata.fields.is_empty() {
+        return Err("Metadata must have at least one field".into());
+    }
+
+    let num_rows = rows.len();
+    let mut field_arrays: Vec<ArrayRef> = Vec::with_capacity(metadata.fields.len());
+    let mut field_names: Vec<FieldName> = Vec::with_capacity(metadata.fields.len());
+
+    // Parse all rows into column values
+    let parsed_rows: Vec<Vec<&str>> = rows
+        .iter()
+        .map(|row| row.split(',').map(|s| s.trim()).collect())
+        .collect();
+
+    for (col_idx, field) in metadata.fields.iter().enumerate() {
+        field_names.push(FieldName::from(field.name.clone()));
+
+        let values: Vec<&str> = parsed_rows
+            .iter()
+            .map(|row| row.get(col_idx).copied().unwrap_or(""))
+            .collect();
+
+        let array = match field.data_type.as_str() {
+            "integer" => build_int_array(&values, field.is_required)?,
+            "string" => build_string_array(&values, field.is_required)?,
+            "boolean" => build_bool_array(&values, field.is_required)?,
+            "double" => build_double_array(&values, field.is_required)?,
+            other => return Err(format!("Unsupported type: {}", other).into()),
+        };
+
+        field_arrays.push(array);
+    }
+
+    // Create struct array
+    let struct_array = StructArray::try_new(
+        FieldNames::from(field_names),
+        field_arrays,
+        num_rows,
+        Validity::NonNullable,
+    )?;
+
+    Ok(struct_array.into_array())
+}
+
+fn build_int_array(values: &[&str], _is_required: bool) -> VortexResult<ArrayRef> {
+    let array: PrimitiveArray = values
+        .iter()
+        .map(|v| v.parse::<i32>().unwrap_or(0))
+        .collect();
+    Ok(array.into_array())
+}
+
+fn build_string_array(values: &[&str], _is_required: bool) -> VortexResult<ArrayRef> {
+    let mut builder = VarBinViewBuilder::with_capacity(DType::Utf8(Nullability::Nullable), values.len());
+    for v in values {
+        builder.append_value(v.as_bytes());
+    }
+    Ok(builder.finish().into_array())
+}
+
+fn build_bool_array(values: &[&str], _is_required: bool) -> VortexResult<ArrayRef> {
+    let array: BoolArray = values
+        .iter()
+        .map(|v| matches!(v.to_lowercase().as_str(), "true" | "1" | "yes"))
+        .collect();
+    Ok(array.into_array())
+}
+
+fn build_double_array(values: &[&str], _is_required: bool) -> VortexResult<ArrayRef> {
+    let array: PrimitiveArray = values
+        .iter()
+        .map(|v| v.parse::<f64>().unwrap_or(0.0))
+        .collect();
+    Ok(array.into_array())
+}
+
+/// Read data from a Vortex file
+///
+/// # Arguments
+/// * `path` - Input file path
+///
+/// # Returns
+/// A tuple of (DType schema, ArrayRef data)
+pub fn read_vortex_file<P: AsRef<Path>>(path: P) -> VortexResult<(DType, ArrayRef)> {
+    let rt = Runtime::new()?;
+    rt.block_on(read_vortex_file_async(path))
+}
+
+/// Async implementation of Vortex file reading
+pub async fn read_vortex_file_async<P: AsRef<Path>>(path: P) -> VortexResult<(DType, ArrayRef)> {
+    let session = create_session();
+
+    // VortexOpenOptions::open accepts types implementing IntoReadSource
+    // Path/PathBuf implements this trait
+    let vortex_file = session.open_options()
+        .open(path.as_ref())
+        .await?;
+
+    // Get schema from file
+    let dtype = vortex_file.dtype().clone();
+
+    // Read all data using Box::pin for the stream (stream is not Unpin)
+    let stream = vortex_file.scan()?.into_array_stream()?;
+    let mut pinned_stream = Box::pin(stream);
+
+    let mut arrays: Vec<ArrayRef> = Vec::new();
+    while let Some(result) = pinned_stream.as_mut().next().await {
+        let array = result?;
+        arrays.push(array);
+    }
+
+    // For now, return first array (simple case)
+    if arrays.is_empty() {
+        return Err("No data found in file".into());
+    }
+
+    Ok((dtype, arrays.into_iter().next().unwrap()))
+}
+
+/// Get row count from an array
+pub fn get_row_count(array: &ArrayRef) -> usize {
+    array.len()
 }
 
 #[cfg(test)]
@@ -316,5 +515,160 @@ mod tests {
         let version = vortex_version();
         assert!(!version.is_empty());
         println!("[TEST] Using Vortex version: {}", version);
+    }
+
+    // ========================================================================
+    // Phase 2: File I/O Tests
+    // ========================================================================
+
+    #[test]
+    fn test_build_struct_array() {
+        let metadata = Metadata::new(
+            "test",
+            vec![
+                MetadataField {
+                    id: 1,
+                    name: "id".to_string(),
+                    data_type: "integer".to_string(),
+                    is_required: true,
+                },
+                MetadataField {
+                    id: 2,
+                    name: "name".to_string(),
+                    data_type: "string".to_string(),
+                    is_required: false,
+                },
+            ],
+        );
+
+        let rows = vec!["1,Alice", "2,Bob", "3,Charlie"];
+        let array = build_struct_array(&metadata, &rows).expect("Should build struct array");
+
+        assert_eq!(array.len(), 3, "Should have 3 rows");
+        println!("[TEST] Built struct array with {} rows", array.len());
+    }
+
+    #[tokio::test]
+    async fn test_write_and_read_vortex_file() {
+        use tempfile::tempdir;
+
+        let metadata = Metadata::new(
+            "test_io",
+            vec![
+                MetadataField {
+                    id: 1,
+                    name: "id".to_string(),
+                    data_type: "integer".to_string(),
+                    is_required: true,
+                },
+                MetadataField {
+                    id: 2,
+                    name: "value".to_string(),
+                    data_type: "double".to_string(),
+                    is_required: false,
+                },
+            ],
+        );
+
+        let rows = vec!["1,10.5", "2,20.3", "3,30.7"];
+
+        // Create temp directory and file path
+        let temp_dir = tempdir().expect("Should create temp dir");
+        let file_path = temp_dir.path().join("test.vtx");
+
+        // Write file (use async version directly)
+        let bytes_written = write_vortex_file_async(&file_path, &metadata, &rows).await
+            .expect("Should write vortex file");
+        assert!(bytes_written > 0, "Should write some bytes");
+        println!("[TEST] Wrote {} bytes to Vortex file", bytes_written);
+
+        // Read file (use async version directly)
+        let (dtype, array) = read_vortex_file_async(&file_path).await
+            .expect("Should read vortex file");
+
+        // Verify schema from footer
+        assert!(matches!(dtype, DType::Struct(_, _)), "Should read struct dtype");
+        if let DType::Struct(fields, _) = &dtype {
+            assert_eq!(fields.names().len(), 2, "Should have 2 fields");
+            println!("[TEST] Read schema with {} fields from footer", fields.names().len());
+        }
+
+        // Verify data
+        assert_eq!(array.len(), 3, "Should read 3 rows");
+        println!("[TEST] Read {} rows from Vortex file", array.len());
+    }
+
+    #[tokio::test]
+    async fn test_write_all_types() {
+        use tempfile::tempdir;
+
+        let metadata = create_test_metadata(); // Has all 4 types
+        let rows = vec![
+            "1,Alice,true,95.5",
+            "2,Bob,false,87.3",
+            "3,Charlie,true,92.1",
+        ];
+
+        let temp_dir = tempdir().expect("Should create temp dir");
+        let file_path = temp_dir.path().join("all_types.vtx");
+
+        // Write (use async version directly)
+        let bytes_written = write_vortex_file_async(&file_path, &metadata, &rows).await
+            .expect("Should write all types");
+        println!("[TEST] Wrote {} bytes with all types", bytes_written);
+
+        // Read and verify (use async version directly)
+        let (dtype, array) = read_vortex_file_async(&file_path).await
+            .expect("Should read all types");
+
+        if let DType::Struct(fields, _) = &dtype {
+            assert_eq!(fields.names().len(), 4, "Should have 4 fields");
+
+            // Verify field names
+            assert_eq!(fields.names()[0].as_ref(), "id");
+            assert_eq!(fields.names()[1].as_ref(), "name");
+            assert_eq!(fields.names()[2].as_ref(), "active");
+            assert_eq!(fields.names()[3].as_ref(), "score");
+        }
+
+        assert_eq!(array.len(), 3, "Should have 3 rows");
+        println!("[TEST] Successfully wrote and read all data types");
+    }
+
+    #[tokio::test]
+    async fn test_schema_roundtrip_via_file() {
+        use tempfile::tempdir;
+
+        let original_metadata = create_test_metadata();
+        let rows = vec!["1,Test,true,50.0"];
+
+        let temp_dir = tempdir().expect("Should create temp dir");
+        let file_path = temp_dir.path().join("schema_test.vtx");
+
+        // Write file (use async version directly)
+        write_vortex_file_async(&file_path, &original_metadata, &rows).await
+            .expect("Should write file");
+
+        // Read schema from file footer (use async version directly)
+        let (dtype, _) = read_vortex_file_async(&file_path).await
+            .expect("Should read file");
+
+        // Convert back to metadata
+        let recovered_metadata = dtype_to_metadata(&dtype, "recovered")
+            .expect("Should convert dtype to metadata");
+
+        // Verify schema matches
+        assert_eq!(
+            recovered_metadata.fields.len(),
+            original_metadata.fields.len(),
+            "Field count should match"
+        );
+
+        for (orig, recv) in original_metadata.fields.iter().zip(recovered_metadata.fields.iter()) {
+            assert_eq!(orig.name, recv.name, "Field name should match");
+            assert_eq!(orig.data_type, recv.data_type, "Data type should match");
+        }
+
+        println!("[TEST] Schema roundtrip via file successful");
     }
 }
