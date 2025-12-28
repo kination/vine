@@ -7,71 +7,38 @@ pub mod vine_streaming_writer;
 pub mod storage_writer;
 pub mod reader_cache;
 pub mod storage_reader;
+pub mod global_cache;
 
-// Vortex experiment module (optional feature)
-#[cfg(feature = "vortex-exp")]
+// Vortex module (now required, not optional)
 pub mod vortex_exp;
 
 use std::ffi::CString;
 
 use jni::JNIEnv;
 use jni::objects::{JClass, JString};
-use jni::sys::{jobject};
+use jni::sys::jobject;
 
-// use metadata::{Metadata, MetadataField};
 use storage_writer::write_data;
 use vine_batch_writer::VineBatchWriter;
 use vine_streaming_writer::VineStreamingWriter;
-use storage_reader::read_vine_data_with_cache;
-// use writer_config::WriterConfig;
+use storage_reader::read_vine_data;
 use std::sync::Mutex;
 use std::collections::HashMap;
-use reader_cache::ReaderCache;
-use writer_cache::WriterCache;
 
-// Global cache registry for all writers and readers
+// Global streaming writer registry (managed here for JNI handle tracking)
 lazy_static::lazy_static! {
-    // Streaming writer registry (already implemented)
     static ref STREAMING_WRITERS: Mutex<HashMap<i64, VineStreamingWriter>> = Mutex::new(HashMap::new());
     static ref WRITER_ID_COUNTER: Mutex<i64> = Mutex::new(0);
-
-    // Reader cache: path -> ReaderCache
-    static ref READER_CACHE: Mutex<HashMap<String, ReaderCache>> = Mutex::new(HashMap::new());
-
-    // Writer cache: path -> WriterCache
-    static ref WRITER_CACHE: Mutex<HashMap<String, WriterCache>> = Mutex::new(HashMap::new());
-}
-
-// Helper function to ensure writer cache exists for a path
-fn ensure_writer_cache(path: &str) {
-    let mut cache_map = WRITER_CACHE.lock().unwrap();
-    if !cache_map.contains_key(path) {
-        match WriterCache::new(std::path::PathBuf::from(path)) {
-            Ok(cache) => {
-                cache_map.insert(path.to_string(), cache);
-            }
-            Err(e) => panic!("Failed to initialize writer cache for {}: {}", path, e),
-        }
-    }
-}
-
-// Helper function to ensure reader cache exists for a path
-fn ensure_reader_cache(path: &str) {
-    let mut cache_map = READER_CACHE.lock().unwrap();
-    if !cache_map.contains_key(path) {
-        match ReaderCache::new(std::path::PathBuf::from(path)) {
-            Ok(cache) => {
-                cache_map.insert(path.to_string(), cache);
-            }
-            Err(e) => panic!("Failed to initialize reader cache for {}: {}", path, e),
-        }
-    }
 }
 
 // ============================================================================
 // Reader JNI Functions
 // ============================================================================
 
+/// Read data from Vine storage
+///
+/// Caching is handled internally by vine-core.
+/// External modules (vine-spark, vine-trino) don't need to manage cache.
 #[no_mangle]
 #[allow(non_snake_case)]
 #[allow(unused_variables)]
@@ -85,13 +52,8 @@ pub extern "C" fn Java_io_kination_vine_VineModule_readDataFromVine(
         .expect("Cannot find data in 'dir_path'")
         .into();
 
-    // Ensure global cache exists for this path
-    // After ensure, get cache reference and use it for reading data
-    ensure_reader_cache(&path);
-    let cache_map = READER_CACHE.lock().unwrap();
-    let cache = cache_map.get(&path).expect("Cache should exist after ensure_reader_cache");
-
-    let rows: Vec<String> = read_vine_data_with_cache(&path, cache);
+    // read_vine_data handles caching internally
+    let rows: Vec<String> = read_vine_data(&path);
     let mut result: String = String::new();
 
     for row in rows {
@@ -110,6 +72,8 @@ pub extern "C" fn Java_io_kination_vine_VineModule_readDataFromVine(
 // ============================================================================
 
 /// Legacy batch write function (backward compatible)
+///
+/// Caching is handled internally by vine-core.
 #[no_mangle]
 #[allow(non_snake_case)]
 #[allow(unused_variables)]
@@ -122,12 +86,14 @@ pub extern "C" fn Java_io_kination_vine_VineModule_writeDataToVine(
     let path_str: String = env.get_string(&path).expect("Fail getting path").into();
     let data_str: String = env.get_string(&data).expect("Fail getting data").into();
     let rows: Vec<&str> = data_str.lines().collect();
+    // write_data -> VineBatchWriter handles caching internally
     write_data(&path_str, &rows).expect("Failed to write data");
 }
 
 /// Batch write with balanced configuration
 #[no_mangle]
 #[allow(non_snake_case)]
+#[allow(unused_variables)]
 pub extern "C" fn Java_io_kination_vine_VineModule_batchWriteBalanced(
     mut env: JNIEnv,
     class: JClass,
@@ -136,10 +102,6 @@ pub extern "C" fn Java_io_kination_vine_VineModule_batchWriteBalanced(
 ) {
     let path_str: String = env.get_string(&path).expect("Fail getting path").into();
     let data_str: String = env.get_string(&data).expect("Fail getting data").into();
-
-    // Use global cache for writer - check cache first, create if not exists
-    ensure_writer_cache(&path_str);
-
     let rows: Vec<&str> = data_str.lines().collect();
     VineBatchWriter::write_balanced(&path_str, &rows).expect("Failed to batch write");
 }
@@ -147,6 +109,7 @@ pub extern "C" fn Java_io_kination_vine_VineModule_batchWriteBalanced(
 /// Batch write with high throughput configuration
 #[no_mangle]
 #[allow(non_snake_case)]
+#[allow(unused_variables)]
 pub extern "C" fn Java_io_kination_vine_VineModule_batchWriteHighThroughput(
     mut env: JNIEnv,
     class: JClass,
@@ -155,10 +118,6 @@ pub extern "C" fn Java_io_kination_vine_VineModule_batchWriteHighThroughput(
 ) {
     let path_str: String = env.get_string(&path).expect("Fail getting path").into();
     let data_str: String = env.get_string(&data).expect("Fail getting data").into();
-
-    // Use global cache for writer
-    ensure_writer_cache(&path_str);
-
     let rows: Vec<&str> = data_str.lines().collect();
     VineBatchWriter::write_high_throughput(&path_str, &rows)
         .expect("Failed to batch write with high throughput");
@@ -167,6 +126,7 @@ pub extern "C" fn Java_io_kination_vine_VineModule_batchWriteHighThroughput(
 /// Batch write with high compression configuration
 #[no_mangle]
 #[allow(non_snake_case)]
+#[allow(unused_variables)]
 pub extern "C" fn Java_io_kination_vine_VineModule_batchWriteHighCompression(
     mut env: JNIEnv,
     class: JClass,
@@ -175,10 +135,6 @@ pub extern "C" fn Java_io_kination_vine_VineModule_batchWriteHighCompression(
 ) {
     let path_str: String = env.get_string(&path).expect("Fail getting path").into();
     let data_str: String = env.get_string(&data).expect("Fail getting data").into();
-
-    // Use global cache for writer
-    ensure_writer_cache(&path_str);
-
     let rows: Vec<&str> = data_str.lines().collect();
     VineBatchWriter::write_high_compression(&path_str, &rows)
         .expect("Failed to batch write with high compression");
@@ -189,8 +145,11 @@ pub extern "C" fn Java_io_kination_vine_VineModule_batchWriteHighCompression(
 // ============================================================================
 
 /// Create a new streaming writer and return its ID
+///
+/// Caching is handled internally by VineStreamingWriter.
 #[no_mangle]
 #[allow(non_snake_case)]
+#[allow(unused_variables)]
 pub extern "C" fn Java_io_kination_vine_VineModule_createStreamingWriter(
     mut env: JNIEnv,
     class: JClass,
@@ -221,6 +180,7 @@ pub extern "C" fn Java_io_kination_vine_VineModule_createStreamingWriter(
 /// Append batch to existing streaming writer
 #[no_mangle]
 #[allow(non_snake_case)]
+#[allow(unused_variables)]
 pub extern "C" fn Java_io_kination_vine_VineModule_streamingAppendBatch(
     mut env: JNIEnv,
     class: JClass,
@@ -241,6 +201,7 @@ pub extern "C" fn Java_io_kination_vine_VineModule_streamingAppendBatch(
 /// Flush streaming writer
 #[no_mangle]
 #[allow(non_snake_case)]
+#[allow(unused_variables)]
 pub extern "C" fn Java_io_kination_vine_VineModule_streamingFlush(
     mut env: JNIEnv,
     class: JClass,
@@ -257,6 +218,7 @@ pub extern "C" fn Java_io_kination_vine_VineModule_streamingFlush(
 /// Close and remove streaming writer
 #[no_mangle]
 #[allow(non_snake_case)]
+#[allow(unused_variables)]
 pub extern "C" fn Java_io_kination_vine_VineModule_streamingClose(
     mut env: JNIEnv,
     class: JClass,
