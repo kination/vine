@@ -2,7 +2,6 @@ use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
 
-// Import from vine_core crate
 use vine_core::storage_reader::read_vine_data;
 use vine_core::vine_batch_writer::VineBatchWriter;
 use vine_core::metadata::Metadata;
@@ -72,7 +71,7 @@ fn test_read_basic_data() {
 
     // Write test data
     let data = vec!["1,alice", "2,bob", "3,charlie"];
-    VineBatchWriter::write_balanced(path, &data).unwrap();
+    VineBatchWriter::write(path, &data).unwrap();
 
     // Read data
     let rows = read_vine_data(path.to_str().unwrap());
@@ -91,7 +90,7 @@ fn test_read_empty_table() {
 
     // Write empty data
     let empty: Vec<&str> = vec![];
-    VineBatchWriter::write_balanced(path, &empty).unwrap();
+    VineBatchWriter::write(path, &empty).unwrap();
 
     // Read data
     let rows = read_vine_data(path.to_str().unwrap());
@@ -111,7 +110,7 @@ fn test_read_all_data_types() {
         "2,bob,false,87.3",
         "3,charlie,true,92.0",
     ];
-    VineBatchWriter::write_balanced(path, &data).unwrap();
+    VineBatchWriter::write(path, &data).unwrap();
 
     // Read data
     let rows = read_vine_data(path.to_str().unwrap());
@@ -134,7 +133,7 @@ fn test_read_large_dataset() {
         .collect();
     let large_data_refs: Vec<&str> = large_data.iter().map(|s| s.as_str()).collect();
 
-    VineBatchWriter::write_balanced(path, &large_data_refs).unwrap();
+    VineBatchWriter::write(path, &large_data_refs).unwrap();
 
     // Read data
     let rows = read_vine_data(path.to_str().unwrap());
@@ -155,13 +154,13 @@ fn test_read_multiple_files() {
     let batch2 = vec!["3,charlie", "4,dave"];
     let batch3 = vec!["5,eve", "6,frank"];
 
-    VineBatchWriter::write_balanced(path, &batch1).unwrap();
+    VineBatchWriter::write(path, &batch1).unwrap();
     std::thread::sleep(std::time::Duration::from_millis(100)); // Ensure different timestamps
 
-    VineBatchWriter::write_balanced(path, &batch2).unwrap();
+    VineBatchWriter::write(path, &batch2).unwrap();
     std::thread::sleep(std::time::Duration::from_millis(100));
 
-    VineBatchWriter::write_balanced(path, &batch3).unwrap();
+    VineBatchWriter::write(path, &batch3).unwrap();
 
     // Read all data
     let rows = read_vine_data(path.to_str().unwrap());
@@ -194,9 +193,8 @@ fn test_read_chronological_order() {
     fs::create_dir(&date3).unwrap();
 
     // Write data to different dates
-    // Using writer which creates files in date directories
     let batch1 = vec!["1,alice"];
-    VineBatchWriter::write_balanced(path, &batch1).unwrap();
+    VineBatchWriter::write(path, &batch1).unwrap();
 
     // Read data - should be in chronological order by date
     let rows = read_vine_data(path.to_str().unwrap());
@@ -211,7 +209,7 @@ fn test_read_missing_metadata() {
     let path = temp_dir.path();
     // Don't create metadata
 
-    // Should return empty vec when metadata is missing (graceful error handling)
+    // Should return empty vec when metadata is missing
     let result = read_vine_data(path.to_str().unwrap());
     assert!(result.is_empty(), "Should return empty vec when metadata is missing");
 }
@@ -222,13 +220,13 @@ fn test_read_with_special_characters() {
     let path = temp_dir.path();
     create_test_metadata(path).unwrap();
 
-    // Write data with special characters (commas in strings should be avoided in CSV)
+    // Write data with special characters
     let data = vec![
         "1,alice@example.com",
         "2,bob-smith",
         "3,charlie_jones",
     ];
-    VineBatchWriter::write_balanced(path, &data).unwrap();
+    VineBatchWriter::write(path, &data).unwrap();
 
     // Read data
     let rows = read_vine_data(path.to_str().unwrap());
@@ -253,7 +251,7 @@ fn test_read_write_consistency() {
         "400,dave",
         "500,eve",
     ];
-    VineBatchWriter::write_balanced(path, &original_data).unwrap();
+    VineBatchWriter::write(path, &original_data).unwrap();
 
     // Read data
     let rows = read_vine_data(path.to_str().unwrap());
@@ -266,53 +264,6 @@ fn test_read_write_consistency() {
             "Row {} should match original data",
             i
         );
-    }
-}
-
-#[test]
-fn test_read_different_configurations() {
-    // Test reading data written with different writer configurations
-
-    // High throughput
-    {
-        let temp_dir = TempDir::new().unwrap();
-        let path = temp_dir.path();
-        create_test_metadata(path).unwrap();
-
-        let data = vec!["1,alice", "2,bob"];
-        VineBatchWriter::write_high_throughput(path, &data).unwrap();
-
-        let rows = read_vine_data(path.to_str().unwrap());
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0], "1,alice");
-    }
-
-    // Balanced
-    {
-        let temp_dir = TempDir::new().unwrap();
-        let path = temp_dir.path();
-        create_test_metadata(path).unwrap();
-
-        let data = vec!["1,alice", "2,bob"];
-        VineBatchWriter::write_balanced(path, &data).unwrap();
-
-        let rows = read_vine_data(path.to_str().unwrap());
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0], "1,alice");
-    }
-
-    // High compression
-    {
-        let temp_dir = TempDir::new().unwrap();
-        let path = temp_dir.path();
-        create_test_metadata(path).unwrap();
-
-        let data = vec!["1,alice", "2,bob"];
-        VineBatchWriter::write_high_compression(path, &data).unwrap();
-
-        let rows = read_vine_data(path.to_str().unwrap());
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0], "1,alice");
     }
 }
 
@@ -343,7 +294,7 @@ fn test_read_boolean_values() {
 
     // Write boolean data
     let data = vec!["1,true", "2,false", "3,true"];
-    VineBatchWriter::write_balanced(path, &data).unwrap();
+    VineBatchWriter::write(path, &data).unwrap();
 
     // Read data
     let rows = read_vine_data(path.to_str().unwrap());
@@ -381,7 +332,7 @@ fn test_read_double_precision() {
 
     // Write double data
     let data = vec!["1,3.14159", "2,2.71828", "3,1.41421"];
-    VineBatchWriter::write_balanced(path, &data).unwrap();
+    VineBatchWriter::write(path, &data).unwrap();
 
     // Read data
     let rows = read_vine_data(path.to_str().unwrap());
@@ -426,7 +377,7 @@ fn test_read_field_order_consistency() {
 
     // Write data in metadata field order (not ID order)
     let data = vec!["foo,1,bar", "baz,2,qux"];
-    VineBatchWriter::write_balanced(path, &data).unwrap();
+    VineBatchWriter::write(path, &data).unwrap();
 
     // Read data
     let rows = read_vine_data(path.to_str().unwrap());
@@ -442,19 +393,19 @@ fn test_read_field_order_consistency() {
 // ============================================================================
 
 #[test]
-fn test_infer_schema_from_parquet() {
+fn test_infer_schema_from_vortex() {
     let temp_dir = TempDir::new().unwrap();
     let path = temp_dir.path();
 
     // First write data with metadata
     create_test_metadata(path).unwrap();
     let data = vec!["1,alice", "2,bob"];
-    VineBatchWriter::write_balanced(path, &data).unwrap();
+    VineBatchWriter::write(path, &data).unwrap();
 
     // Remove the metadata file
     fs::remove_file(path.join("vine_meta.json")).unwrap();
 
-    // Now infer schema from Parquet
+    // Now infer schema from Vortex
     let metadata = Metadata::infer_from_vortex(path).unwrap();
 
     assert_eq!(metadata.table_name, "inferred");
@@ -473,7 +424,7 @@ fn test_infer_schema_all_types() {
     // Create metadata with all types
     create_metadata_all_types(path).unwrap();
     let data = vec!["1,alice,true,3.14"];
-    VineBatchWriter::write_balanced(path, &data).unwrap();
+    VineBatchWriter::write(path, &data).unwrap();
 
     // Remove metadata and infer
     fs::remove_file(path.join("vine_meta.json")).unwrap();
@@ -494,7 +445,7 @@ fn test_save_and_load_cached_schema() {
     // Create test metadata
     create_test_metadata(path).unwrap();
     let data = vec!["1,alice"];
-    VineBatchWriter::write_balanced(path, &data).unwrap();
+    VineBatchWriter::write(path, &data).unwrap();
 
     // Infer schema and save to cache
     let metadata = Metadata::infer_from_vortex(path).unwrap();
@@ -519,7 +470,7 @@ fn test_reader_cache_fallback_with_metadata() {
     // Create metadata and write data
     create_test_metadata(path).unwrap();
     let data = vec!["1,alice"];
-    VineBatchWriter::write_balanced(path, &data).unwrap();
+    VineBatchWriter::write(path, &data).unwrap();
 
     // Should use vine_meta.json when available
     let cache = ReaderCache::new_with_fallback(path.to_path_buf()).unwrap();
@@ -528,17 +479,17 @@ fn test_reader_cache_fallback_with_metadata() {
 }
 
 #[test]
-fn test_reader_cache_fallback_infer_from_parquet() {
+fn test_reader_cache_fallback_infer_from_vortex() {
     let temp_dir = TempDir::new().unwrap();
     let path = temp_dir.path();
 
     // Create metadata, write data, then remove metadata
     create_test_metadata(path).unwrap();
     let data = vec!["1,alice", "2,bob"];
-    VineBatchWriter::write_balanced(path, &data).unwrap();
+    VineBatchWriter::write(path, &data).unwrap();
     fs::remove_file(path.join("vine_meta.json")).unwrap();
 
-    // Should infer from Parquet files
+    // Should infer from Vortex files
     let cache = ReaderCache::new_with_fallback(path.to_path_buf()).unwrap();
     assert_eq!(cache.metadata.fields.len(), 2);
     assert_eq!(cache.metadata.table_name, "inferred");
@@ -569,10 +520,10 @@ fn test_reader_cache_fallback_use_cached_schema() {
     fs::create_dir_all(path.join("_meta")).unwrap();
     fs::write(path.join("_meta").join("schema.json"), cached_metadata).unwrap();
 
-    // Create a dummy parquet file (not needed for this test since cache exists)
+    // Create data file
     create_test_metadata(path).unwrap();
     let data = vec!["1,alice"];
-    VineBatchWriter::write_balanced(path, &data).unwrap();
+    VineBatchWriter::write(path, &data).unwrap();
     fs::remove_file(path.join("vine_meta.json")).unwrap();
 
     // Should use cached schema
@@ -582,7 +533,7 @@ fn test_reader_cache_fallback_use_cached_schema() {
 }
 
 #[test]
-fn test_infer_schema_no_parquet_files() {
+fn test_infer_schema_no_vortex_files() {
     let temp_dir = TempDir::new().unwrap();
     let path = temp_dir.path();
 

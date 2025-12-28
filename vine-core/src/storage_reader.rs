@@ -1,6 +1,6 @@
-
 /// Reads data from Vortex (.vtx) files in date-partitioned directories.
-/// Uses internal caching - external modules don't need to manage cache.
+/// Caching is handled internally.
+
 use std::fs;
 use std::path::PathBuf;
 
@@ -10,11 +10,16 @@ use crate::global_cache;
 use crate::metadata::Metadata;
 use crate::vortex_exp::{read_vortex_file, array_to_csv_rows};
 
-/// Read all data from Vine format storage (Vortex files)
+/// Read all data from Vine storage
 ///
-/// This is main entry point to read Vine data.
-/// Caching is handled internally - callers don't need to manage cache.
+/// This is the main entry point for reading Vine data.
+/// Caching is handled internally.
 ///
+/// # Arguments
+/// * `dir_path` - Base directory containing date-partitioned Vortex files
+///
+/// # Returns
+/// Vector of CSV-formatted row strings
 pub fn read_vine_data(dir_path: &str) -> Vec<String> {
     read_vine_data_internal(dir_path)
         .unwrap_or_else(|e| {
@@ -23,21 +28,9 @@ pub fn read_vine_data(dir_path: &str) -> Vec<String> {
         })
 }
 
-/// Read all data with external cache (backward compatible API)
-///
-/// Note: The cache parameter is used for metadata.
-/// This function is kept for API compatibility.
-pub fn read_vine_data_with_cache(dir_path: &str, cache: &crate::reader_cache::ReaderCache) -> Vec<String> {
-    read_with_metadata(dir_path, &cache.metadata)
-        .unwrap_or_else(|e| {
-            eprintln!("Error reading Vine data: {}", e);
-            Vec::new()
-        })
-}
-
-/// Internal implementation of Vine data reading with automatic caching
+/// Internal implementation with automatic caching
 fn read_vine_data_internal(dir_path: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    // Use global cache to get metadata (cache-first approach)
+    // Use global cache to get metadata
     let metadata = global_cache::get_reader_metadata(dir_path)?;
     read_with_metadata(dir_path, &metadata)
 }
@@ -79,7 +72,6 @@ fn read_with_metadata(dir_path: &str, metadata: &Metadata) -> Result<Vec<String>
             if file_path.extension().map_or(false, |ext| ext == "vtx") {
                 if let Err(e) = read_vortex_file_to_rows(&file_path, metadata, &mut all_rows) {
                     eprintln!("Warning: Failed to read file {:?}: {}", file_path, e);
-                    // Continue reading other files even if one fails
                 }
             }
         }

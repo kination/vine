@@ -1,59 +1,42 @@
+use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::streaming_writer::StreamingWriter;
-use crate::writer_config::WriterConfig;
+use chrono::Local;
+
+use crate::global_cache;
+use crate::vortex_exp::write_vortex_file;
 
 /// Batch writer for bulk data ingestion
 ///
-/// Optimized to write large amounts of data in single operation.
-/// Implemented based on 'StreamingWriter', but provides simplified API for batch job.
-///
-/// # Example
-/// ```no_run
-/// use vine_core::vine_batch_writer::VineBatchWriter;
-/// use vine_core::writer_config::WriterConfig;
-///
-/// let data = vec!["1,alice", "2,bob", "3,charlie"];
-/// VineBatchWriter::write("/data/users", &data, WriterConfig::balanced())?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// Writes all data in a single operation.
+/// Caching is handled internally.
 pub struct VineBatchWriter;
 
 impl VineBatchWriter {
-    /// Write all data at once with specified configuration
+    /// Write all data at once
     pub fn write<P: AsRef<Path>>(
         path: P,
         data: &[&str],
-        config: WriterConfig,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let base_path: PathBuf = PathBuf::from(path.as_ref());
-        let mut writer: StreamingWriter = StreamingWriter::new(base_path, config)?;
-        writer.write_batch(data)?;
-        writer.close()?;
+        let path_str = base_path.to_str().unwrap_or("");
+
+        // Use global cache to get metadata
+        let metadata = global_cache::get_writer_metadata(path_str)?;
+
+        // Create date partition directory
+        let date_str = Local::now().format("%Y-%m-%d").to_string();
+        let partition_dir = base_path.join(&date_str);
+        fs::create_dir_all(&partition_dir)?;
+
+        // Generate filename with microsecond precision
+        let timestamp = Local::now().format("%H%M%S_%f").to_string();
+        let file_path = partition_dir.join(format!("data_{}.vtx", timestamp));
+
+        // Write Vortex file
+        write_vortex_file(&file_path, &metadata, data)
+            .map_err(|e| -> Box<dyn std::error::Error> { e })?;
+
         Ok(())
-    }
-
-    /// Write with 'high throughput'
-    pub fn write_high_throughput<P: AsRef<Path>>(
-        path: P,
-        data: &[&str],
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        Self::write(path, data, WriterConfig::high_throughput())
-    }
-
-    /// Write with 'balanced' settings (default)
-    pub fn write_balanced<P: AsRef<Path>>(
-        path: P,
-        data: &[&str],
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        Self::write(path, data, WriterConfig::balanced())
-    }
-
-    /// Write with 'high compression'
-    pub fn write_high_compression<P: AsRef<Path>>(
-        path: P,
-        data: &[&str],
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        Self::write(path, data, WriterConfig::high_compression())
     }
 }

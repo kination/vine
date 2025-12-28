@@ -8,8 +8,6 @@ pub mod storage_writer;
 pub mod reader_cache;
 pub mod storage_reader;
 pub mod global_cache;
-
-// Vortex module (now required, not optional)
 pub mod vortex_exp;
 
 use std::ffi::CString;
@@ -25,7 +23,7 @@ use storage_reader::read_vine_data;
 use std::sync::Mutex;
 use std::collections::HashMap;
 
-// Global streaming writer registry (managed here for JNI handle tracking)
+// Global streaming writer registry for JNI handle tracking
 lazy_static::lazy_static! {
     static ref STREAMING_WRITERS: Mutex<HashMap<i64, VineStreamingWriter>> = Mutex::new(HashMap::new());
     static ref WRITER_ID_COUNTER: Mutex<i64> = Mutex::new(0);
@@ -34,6 +32,8 @@ lazy_static::lazy_static! {
 // ============================================================================
 // Reader JNI Functions
 // ============================================================================
+
+/// Read data from Vine storage
 #[no_mangle]
 #[allow(non_snake_case)]
 #[allow(unused_variables)]
@@ -47,7 +47,6 @@ pub extern "C" fn Java_io_kination_vine_VineModule_readDataFromVine(
         .expect("Cannot find data in 'dir_path'")
         .into();
 
-    // read_vine_data handles caching internally
     let rows: Vec<String> = read_vine_data(&path);
     let mut result: String = String::new();
 
@@ -65,6 +64,8 @@ pub extern "C" fn Java_io_kination_vine_VineModule_readDataFromVine(
 // ============================================================================
 // Batch Writer JNI Functions
 // ============================================================================
+
+/// Write data to Vine storage
 #[no_mangle]
 #[allow(non_snake_case)]
 #[allow(unused_variables)]
@@ -77,15 +78,14 @@ pub extern "C" fn Java_io_kination_vine_VineModule_writeDataToVine(
     let path_str: String = env.get_string(&path).expect("Fail getting path").into();
     let data_str: String = env.get_string(&data).expect("Fail getting data").into();
     let rows: Vec<&str> = data_str.lines().collect();
-    // write_data -> VineBatchWriter handles caching internally
     write_data(&path_str, &rows).expect("Failed to write data");
 }
 
-/// Batch write with balanced configuration
+/// Batch write data
 #[no_mangle]
 #[allow(non_snake_case)]
 #[allow(unused_variables)]
-pub extern "C" fn Java_io_kination_vine_VineModule_batchWriteBalanced(
+pub extern "C" fn Java_io_kination_vine_VineModule_batchWrite(
     mut env: JNIEnv,
     class: JClass,
     path: JString,
@@ -94,46 +94,13 @@ pub extern "C" fn Java_io_kination_vine_VineModule_batchWriteBalanced(
     let path_str: String = env.get_string(&path).expect("Fail getting path").into();
     let data_str: String = env.get_string(&data).expect("Fail getting data").into();
     let rows: Vec<&str> = data_str.lines().collect();
-    VineBatchWriter::write_balanced(&path_str, &rows).expect("Failed to batch write");
-}
-
-/// Batch write with high throughput configuration
-#[no_mangle]
-#[allow(non_snake_case)]
-#[allow(unused_variables)]
-pub extern "C" fn Java_io_kination_vine_VineModule_batchWriteHighThroughput(
-    mut env: JNIEnv,
-    class: JClass,
-    path: JString,
-    data: JString,
-) {
-    let path_str: String = env.get_string(&path).expect("Fail getting path").into();
-    let data_str: String = env.get_string(&data).expect("Fail getting data").into();
-    let rows: Vec<&str> = data_str.lines().collect();
-    VineBatchWriter::write_high_throughput(&path_str, &rows)
-        .expect("Failed to batch write with high throughput");
-}
-
-/// Batch write with high compression configuration
-#[no_mangle]
-#[allow(non_snake_case)]
-#[allow(unused_variables)]
-pub extern "C" fn Java_io_kination_vine_VineModule_batchWriteHighCompression(
-    mut env: JNIEnv,
-    class: JClass,
-    path: JString,
-    data: JString,
-) {
-    let path_str: String = env.get_string(&path).expect("Fail getting path").into();
-    let data_str: String = env.get_string(&data).expect("Fail getting data").into();
-    let rows: Vec<&str> = data_str.lines().collect();
-    VineBatchWriter::write_high_compression(&path_str, &rows)
-        .expect("Failed to batch write with high compression");
+    VineBatchWriter::write(&path_str, &rows).expect("Failed to batch write");
 }
 
 // ============================================================================
 // Streaming Writer JNI Functions
 // ============================================================================
+
 /// Create a new streaming writer and return its ID
 #[no_mangle]
 #[allow(non_snake_case)]
@@ -142,17 +109,11 @@ pub extern "C" fn Java_io_kination_vine_VineModule_createStreamingWriter(
     mut env: JNIEnv,
     class: JClass,
     path: JString,
-    config_type: jni::sys::jint, // 0=balanced, 1=high_throughput, 2=high_compression
 ) -> jni::sys::jlong {
     let path_str: String = env.get_string(&path).expect("Fail getting path").into();
 
-    let writer = match config_type {
-        0 => VineStreamingWriter::balanced(&path_str),
-        1 => VineStreamingWriter::high_throughput(&path_str),
-        2 => VineStreamingWriter::high_compression(&path_str),
-        _ => VineStreamingWriter::balanced(&path_str),
-    }
-    .expect("Failed to create streaming writer");
+    let writer = VineStreamingWriter::new(&path_str)
+        .expect("Failed to create streaming writer");
 
     let mut counter = WRITER_ID_COUNTER.lock().unwrap();
     let id = *counter;

@@ -1,23 +1,22 @@
 [package]
 name = "vine-core"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-parquet = "53.0"
+# Core dependencies
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 chrono = "0.4"
 jni = "0.21.1"
 lazy_static = "1.4"
 
-# Vortex experiment (optional feature)
-# Only vortex-dtype is needed for schema conversion experiments
-vortex-dtype = { version = "0.56.0", optional = true }
-
-[features]
-default = []
-vortex-exp = ["vortex-dtype"]
+# Vortex (primary storage format)
+vortex = { version = "0.56.0", features = ["tokio"] }
+vortex-dtype = { version = "0.56.0" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+futures = { version = "0.3" }
+async-fs = { version = "2" }
 
 [dev-dependencies]
 tempfile = "3.8"

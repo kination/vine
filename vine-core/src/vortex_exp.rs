@@ -1,18 +1,8 @@
-//! Vortex Storage Module
-//!
-//! This module provides Vortex-based file I/O for the Vine datalake format.
-//! Vortex replaces Parquet as the primary storage format.
-//!
-//! # Features
-//! - DType conversion between Vine metadata and Vortex
-//! - File read/write with date partitioning
-//! - CSV ↔ Vortex array conversion for JNI compatibility
-//!
-//! # Testing
-//! ```bash
-//! cargo test vortex_exp
-//! ```
-
+/// Provides Vortex-based file I/O for Vine.
+/// - DType conversion between Vine metadata and Vortex
+/// - File read/write with date partitioning
+/// - CSV ↔ Vortex array conversion for JNI
+///
 use std::path::Path;
 
 use futures::StreamExt;
