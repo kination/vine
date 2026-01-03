@@ -1,0 +1,35 @@
+{
+  "table_name": "events",
+  "fields": [
+    {
+      "id": 1,
+      "name": "event_id",
+      "data_type": "integer",
+      "is_required": true
+    },
+    {
+      "id": 2,
+      "name": "event_name",
+      "data_type": "string",
+      "is_required": true
+    },
+    {
+      "id": 3,
+      "name": "user_id",
+      "data_type": "integer",
+      "is_required": true
+    },
+    {
+      "id": 4,
+      "name": "timestamp",
+      "data_type": "integer",
+      "is_required": true
+    },
+    {
+      "id": 5,
+      "name": "is_active",
+      "data_type": "boolean",
+      "is_required": true
+    }
+  ]
+}

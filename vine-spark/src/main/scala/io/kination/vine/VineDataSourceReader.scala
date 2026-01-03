@@ -8,7 +8,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 class VineDataSourceReader(options: CaseInsensitiveStringMap, schema: StructType) extends ScanBuilder {
   override def build(): Scan = {
     val rootPath = options.get("path")
-    val rawData = VineModule.readData(f"$rootPath/result")
+    val rawData = VineModule.readDataFromVine(f"$rootPath/result")
     new VineDataSourceScan(rawData, schema)
   }
 }

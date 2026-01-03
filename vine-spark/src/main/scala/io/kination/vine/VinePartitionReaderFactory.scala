@@ -5,9 +5,10 @@ import org.apache.spark.sql.catalyst.expressions.GenericInternalRow
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.connector.read.{InputPartition, PartitionReader, PartitionReaderFactory}
 import org.apache.spark.unsafe.types.UTF8String
-import org.apache.spark.sql.types.StructType
 
-
+/**
+ * Create Vine partition readers.
+ */
 class VinePartitionReaderFactory(schema: StructType) extends PartitionReaderFactory {
 
   override def createReader(partition: InputPartition): PartitionReader[InternalRow] = {
@@ -15,10 +16,14 @@ class VinePartitionReaderFactory(schema: StructType) extends PartitionReaderFact
   }
 }
 
+/**
+ * Converts CSV data (from JNI) to InternalRows.
+ * Supports all Vine/Vortex types.
+ */
 class VinePartitionReader(rawData: String, schema: StructType) extends PartitionReader[InternalRow] {
-  // TODO: think of good rawData format
+
   private val rows = rawData.split("\n").filter(_.nonEmpty).toList.map { line =>
-    line.split(",").map(_.trim.stripPrefix("\"").stripSuffix("\""))
+    line.split(",", -1).map(_.trim.stripPrefix("\"").stripSuffix("\""))
   }
 
   private val iterator = rows.iterator
@@ -28,14 +33,24 @@ class VinePartitionReader(rawData: String, schema: StructType) extends Partition
   override def get(): InternalRow = {
     val fields = iterator.next()
     val values = schema.fields.zipWithIndex.map { case (field, idx) =>
-      field.dataType match {
-        case StringType => UTF8String.fromString(fields(idx))
-        case IntegerType => fields(idx).toInt
-        case _ => UTF8String.fromString(fields(idx)) // fallback
+      val value = if (idx < fields.length) fields(idx) else ""
+
+      if (value.isEmpty) {
+        null  // Handle nulls
+      } else {
+        parseValue(value, field.dataType)
       }
     }
     new GenericInternalRow(values.toArray)
   }
 
   override def close(): Unit = {}
+
+  /**
+   * Parse string value to appropriate Spark internal type.
+   * Supports all Vine/Vortex types.
+   */
+  private def parseValue(value: String, dataType: DataType): Any = {
+    VineTypeUtils.parseValue(value, dataType)
+  }
 }
