@@ -2,10 +2,8 @@ use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
 
-// Import from vine_core crate
 use vine_core::vine_batch_writer::VineBatchWriter;
 use vine_core::vine_streaming_writer::VineStreamingWriter;
-use vine_core::writer_config::WriterConfig;
 
 /// Helper function to create test metadata
 fn create_test_metadata(dir: &Path) -> std::io::Result<()> {
@@ -34,14 +32,14 @@ fn create_test_metadata(dir: &Path) -> std::io::Result<()> {
 // ============================================================================
 
 #[test]
-fn test_batch_writer_balanced() {
+fn test_batch_writer() {
     let temp_dir = TempDir::new().unwrap();
     let path = temp_dir.path();
     create_test_metadata(path).unwrap();
 
     let data = vec!["1,alice", "2,bob", "3,charlie"];
 
-    let result = VineBatchWriter::write_balanced(path, &data);
+    let result = VineBatchWriter::write(path, &data);
     assert!(result.is_ok(), "Batch write should succeed");
 
     // Verify files were created
@@ -55,42 +53,6 @@ fn test_batch_writer_balanced() {
 }
 
 #[test]
-fn test_batch_writer_high_throughput() {
-    let temp_dir = TempDir::new().unwrap();
-    let path = temp_dir.path();
-    create_test_metadata(path).unwrap();
-
-    let data = vec!["1,alice", "2,bob"];
-
-    let result = VineBatchWriter::write_high_throughput(path, &data);
-    assert!(result.is_ok(), "High throughput write should succeed");
-}
-
-#[test]
-fn test_batch_writer_high_compression() {
-    let temp_dir = TempDir::new().unwrap();
-    let path = temp_dir.path();
-    create_test_metadata(path).unwrap();
-
-    let data = vec!["1,alice"];
-
-    let result = VineBatchWriter::write_high_compression(path, &data);
-    assert!(result.is_ok(), "High compression write should succeed");
-}
-
-#[test]
-fn test_batch_writer_custom_config() {
-    let temp_dir = TempDir::new().unwrap();
-    let path = temp_dir.path();
-    create_test_metadata(path).unwrap();
-
-    let data = vec!["1,alice", "2,bob"];
-
-    let result = VineBatchWriter::write(path, &data, WriterConfig::high_throughput());
-    assert!(result.is_ok(), "Write with custom config should succeed");
-}
-
-#[test]
 fn test_empty_batch() {
     let temp_dir = TempDir::new().unwrap();
     let path = temp_dir.path();
@@ -98,8 +60,7 @@ fn test_empty_batch() {
 
     let empty: Vec<&str> = vec![];
 
-    // Batch writer with empty data
-    let result = VineBatchWriter::write_balanced(path, &empty);
+    let result = VineBatchWriter::write(path, &empty);
     assert!(result.is_ok(), "Empty batch should not fail");
 }
 
@@ -113,7 +74,7 @@ fn test_large_batch() {
     let large_data: Vec<String> = (0..1000).map(|i| format!("{},user{}", i, i)).collect();
     let large_data_refs: Vec<&str> = large_data.iter().map(|s| s.as_str()).collect();
 
-    let result = VineBatchWriter::write_balanced(path, &large_data_refs);
+    let result = VineBatchWriter::write(path, &large_data_refs);
     assert!(result.is_ok(), "Large batch should succeed");
 }
 
@@ -125,7 +86,7 @@ fn test_missing_metadata() {
 
     let data = vec!["1,alice"];
 
-    let result = VineBatchWriter::write_balanced(path, &data);
+    let result = VineBatchWriter::write(path, &data);
     assert!(result.is_err(), "Should fail without metadata");
 }
 
@@ -134,12 +95,12 @@ fn test_missing_metadata() {
 // ============================================================================
 
 #[test]
-fn test_streaming_writer_balanced() {
+fn test_streaming_writer() {
     let temp_dir = TempDir::new().unwrap();
     let path = temp_dir.path();
     create_test_metadata(path).unwrap();
 
-    let mut writer = VineStreamingWriter::balanced(path).unwrap();
+    let mut writer = VineStreamingWriter::new(path).unwrap();
 
     // Write first batch
     let batch1 = vec!["1,alice", "2,bob"];
@@ -159,7 +120,7 @@ fn test_streaming_writer_flush() {
     let path = temp_dir.path();
     create_test_metadata(path).unwrap();
 
-    let mut writer = VineStreamingWriter::balanced(path).unwrap();
+    let mut writer = VineStreamingWriter::new(path).unwrap();
 
     // Write and flush
     let batch1 = vec!["1,alice"];
@@ -174,43 +135,12 @@ fn test_streaming_writer_flush() {
 }
 
 #[test]
-fn test_streaming_writer_high_throughput() {
-    let temp_dir = TempDir::new().unwrap();
-    let path = temp_dir.path();
-    create_test_metadata(path).unwrap();
-
-    let mut writer = VineStreamingWriter::high_throughput(path).unwrap();
-
-    for i in 0..10 {
-        let batch = vec![format!("{},user{}", i, i)];
-        let batch_refs: Vec<&str> = batch.iter().map(|s| s.as_str()).collect();
-        writer.append_batch(&batch_refs).unwrap();
-    }
-
-    writer.close().unwrap();
-}
-
-#[test]
-fn test_streaming_writer_high_compression() {
-    let temp_dir = TempDir::new().unwrap();
-    let path = temp_dir.path();
-    create_test_metadata(path).unwrap();
-
-    let mut writer = VineStreamingWriter::high_compression(path).unwrap();
-
-    let batch = vec!["1,alice", "2,bob", "3,charlie"];
-    writer.append_batch(&batch).unwrap();
-
-    writer.close().unwrap();
-}
-
-#[test]
 fn test_multiple_flushes() {
     let temp_dir = TempDir::new().unwrap();
     let path = temp_dir.path();
     create_test_metadata(path).unwrap();
 
-    let mut writer = VineStreamingWriter::balanced(path).unwrap();
+    let mut writer = VineStreamingWriter::new(path).unwrap();
 
     for _ in 0..3 {
         let batch = vec!["1,test"];
@@ -227,7 +157,7 @@ fn test_streaming_empty_batch() {
     let path = temp_dir.path();
     create_test_metadata(path).unwrap();
 
-    let mut writer = VineStreamingWriter::balanced(path).unwrap();
+    let mut writer = VineStreamingWriter::new(path).unwrap();
 
     let empty: Vec<&str> = vec![];
     let result = writer.append_batch(&empty);
@@ -244,7 +174,7 @@ fn test_streaming_single_row_batches() {
     let path = temp_dir.path();
     create_test_metadata(path).unwrap();
 
-    let mut writer = VineStreamingWriter::balanced(path).unwrap();
+    let mut writer = VineStreamingWriter::new(path).unwrap();
 
     // Write many single-row batches
     for i in 0..100 {
@@ -262,7 +192,7 @@ fn test_streaming_alternating_batch_sizes() {
     let path = temp_dir.path();
     create_test_metadata(path).unwrap();
 
-    let mut writer = VineStreamingWriter::balanced(path).unwrap();
+    let mut writer = VineStreamingWriter::new(path).unwrap();
 
     // Small batch
     let small = vec!["1,alice"];
@@ -286,7 +216,7 @@ fn test_streaming_flush_timing() {
     let path = temp_dir.path();
     create_test_metadata(path).unwrap();
 
-    let mut writer = VineStreamingWriter::balanced(path).unwrap();
+    let mut writer = VineStreamingWriter::new(path).unwrap();
 
     // Write without flush
     let batch1 = vec!["1,alice"];
@@ -302,7 +232,7 @@ fn test_streaming_flush_timing() {
     // Close (implicitly flushes)
     writer.close().unwrap();
 
-    // Verify multiple files were created (one per flush)
+    // Verify date directories were created
     let date_dirs: Vec<_> = fs::read_dir(path)
         .unwrap()
         .filter_map(|e| e.ok())
@@ -310,56 +240,6 @@ fn test_streaming_flush_timing() {
         .collect();
 
     assert!(!date_dirs.is_empty(), "Should create date directories");
-}
-
-// ============================================================================
-// Configuration Comparison Tests
-// ============================================================================
-
-#[test]
-fn test_config_balanced_properties() {
-    let config = WriterConfig::balanced();
-
-    // Balanced should use SNAPPY compression
-    // This is implicit in the configuration, testing via successful write
-    let temp_dir = TempDir::new().unwrap();
-    let path = temp_dir.path();
-    create_test_metadata(path).unwrap();
-
-    let data = vec!["1,alice", "2,bob"];
-    let result = VineBatchWriter::write(path, &data, config);
-
-    assert!(result.is_ok());
-}
-
-#[test]
-fn test_config_high_throughput_properties() {
-    let config = WriterConfig::high_throughput();
-
-    // High throughput should use no compression
-    let temp_dir = TempDir::new().unwrap();
-    let path = temp_dir.path();
-    create_test_metadata(path).unwrap();
-
-    let data = vec!["1,alice", "2,bob"];
-    let result = VineBatchWriter::write(path, &data, config);
-
-    assert!(result.is_ok());
-}
-
-#[test]
-fn test_config_high_compression_properties() {
-    let config = WriterConfig::high_compression();
-
-    // High compression should use ZSTD
-    let temp_dir = TempDir::new().unwrap();
-    let path = temp_dir.path();
-    create_test_metadata(path).unwrap();
-
-    let data = vec!["1,alice", "2,bob"];
-    let result = VineBatchWriter::write(path, &data, config);
-
-    assert!(result.is_ok());
 }
 
 // ============================================================================
@@ -410,7 +290,7 @@ fn test_write_all_data_types() {
         "3,charlie,true,92.0",
     ];
 
-    let result = VineBatchWriter::write_balanced(path, &data);
+    let result = VineBatchWriter::write(path, &data);
     assert!(result.is_ok(), "Should write all data types successfully");
 }
 
@@ -439,7 +319,7 @@ fn test_write_boolean_values() {
     fs::write(path.join("vine_meta.json"), metadata).unwrap();
 
     let data = vec!["1,true", "2,false", "3,true", "4,false"];
-    let result = VineBatchWriter::write_balanced(path, &data);
+    let result = VineBatchWriter::write(path, &data);
 
     assert!(result.is_ok(), "Should write boolean values");
 }
@@ -469,26 +349,9 @@ fn test_write_double_values() {
     fs::write(path.join("vine_meta.json"), metadata).unwrap();
 
     let data = vec!["1,3.14159", "2,2.71828", "3,1.41421"];
-    let result = VineBatchWriter::write_balanced(path, &data);
+    let result = VineBatchWriter::write(path, &data);
 
     assert!(result.is_ok(), "Should write double values");
-}
-
-// ============================================================================
-// Legacy API Tests
-// ============================================================================
-
-#[test]
-fn test_legacy_write_data() {
-    let temp_dir = TempDir::new().unwrap();
-    let path = temp_dir.path();
-    create_test_metadata(path).unwrap();
-
-    let data = vec!["1,alice", "2,bob"];
-
-    // Test legacy write_data function
-    let result = vine_core::storage_writer::write_data(path, &data);
-    assert!(result.is_ok(), "Legacy write_data should work");
 }
 
 // ============================================================================
@@ -502,7 +365,7 @@ fn test_write_without_metadata() {
     // Intentionally don't create metadata
 
     let data = vec!["1,alice"];
-    let result = VineBatchWriter::write_balanced(path, &data);
+    let result = VineBatchWriter::write(path, &data);
 
     assert!(result.is_err(), "Should fail without metadata");
 }
@@ -510,7 +373,7 @@ fn test_write_without_metadata() {
 #[test]
 fn test_write_to_invalid_path() {
     let data = vec!["1,alice"];
-    let result = VineBatchWriter::write_balanced("/nonexistent/invalid/path", &data);
+    let result = VineBatchWriter::write("/nonexistent/invalid/path", &data);
 
     assert!(result.is_err(), "Should fail with invalid path");
 }

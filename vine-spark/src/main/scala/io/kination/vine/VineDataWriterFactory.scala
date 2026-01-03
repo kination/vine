@@ -2,47 +2,39 @@ package io.kination.vine
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.write._
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.types._
 import scala.collection.mutable.ListBuffer
 
-class VineDataWriterFactory(schema: StructType, info: PhysicalWriteInfo) extends DataWriterFactory {
+/**
+ * Factory to create data writers for Spark DataSource V2.
+ */
+class VineDataWriterFactory(
+    schema: StructType,
+    info: PhysicalWriteInfo,
+    path: String
+) extends DataWriterFactory {
 
   override def createWriter(partitionId: Int, taskId: Long): DataWriter[InternalRow] = {
-    new VineDataWriter(schema, info)
+    new VineDataWriter(schema, info, path)
   }
 }
 
-class VineDataWriter(schema: StructType, info: PhysicalWriteInfo) extends DataWriter[InternalRow] {
-  // TODO:
-  //  - This is only supporting for 2 col only. Make data based on schema
-  //  - Put actual path from configs
-  //  - Think of setting up buffer
-  //  - Think of how-to make commit based on multiple partition
+/**
+ * Spark DataSource V2 writer that writes InternalRows to Vine tables.
+ */
+class VineDataWriter(
+    schema: StructType,
+    info: PhysicalWriteInfo,
+    path: String
+) extends DataWriter[InternalRow] {
+
   private val buffer = ListBuffer[String]()
-  private val bufferSize = 10
+  private val bufferSize = 1000  // TODO: Optimize buffer for better performance
 
   override def write(record: InternalRow): Unit = {
-    if (schema.fields.size != record.numFields) {
-      // TODO: number of schema fields and actual record fields are not matching.
-      // Make proper update
-    }
-
-    val data = schema.fields.zipWithIndex.map { case (field, idx) =>
-      field.dataType match {
-        case org.apache.spark.sql.types.StringType => record.getString(idx)
-        case org.apache.spark.sql.types.IntegerType => record.getInt(idx).toString
-        case org.apache.spark.sql.types.LongType => record.getLong(idx).toString
-        case org.apache.spark.sql.types.DoubleType => record.getDouble(idx).toString
-        case org.apache.spark.sql.types.BooleanType => record.getBoolean(idx).toString
-        case org.apache.spark.sql.types.TimestampType => record.getLong(idx).toString
-        // Add more types as needed
-        case _ => record.getString(idx) // fallback to string for unsupported types
-      }
-    }.mkString(",")
-    
-
+    val data = formatRecord(record)
     buffer += data
-    // println(buffer)
+
     if (buffer.size >= bufferSize) {
       flushBuffer()
     }
@@ -52,16 +44,35 @@ class VineDataWriter(schema: StructType, info: PhysicalWriteInfo) extends DataWr
     if (buffer.nonEmpty) {
       flushBuffer()
     }
-    null
+    VineWriterCommitMessage(path, buffer.size)
   }
 
-  override def abort(): Unit = {}
-
-  override def close(): Unit = {}
-
-  private def flushBuffer(): Unit = {
-    val mergeBuffer = buffer.mkString("\n")
-    VineModule.writeData("vine-test/result", mergeBuffer)
+  override def abort(): Unit = {
     buffer.clear()
   }
+
+  override def close(): Unit = {
+    // Nothing to do - buffer is flushed on commit
+  }
+
+  /**
+   * Format InternalRow to CSV string for JNI.
+   * Supports all Vine/Vortex types.
+   */
+  private def formatRecord(record: InternalRow): String = {
+    VineTypeUtils.formatInternalRow(record, schema)
+  }
+
+  private def flushBuffer(): Unit = {
+    if (buffer.nonEmpty) {
+      val mergeBuffer = buffer.mkString("\n")
+      VineModule.batchWrite(path, mergeBuffer)
+      buffer.clear()
+    }
+  }
 }
+
+/**
+ * Commit message containing write statistics.
+ */
+case class VineWriterCommitMessage(path: String, rowsWritten: Int) extends WriterCommitMessage

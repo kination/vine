@@ -1,9 +1,11 @@
+//! Vine Metadata Schema Management
+//!
+//! Handles loading and saving of vine_meta.json schema files.
+
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
-use std::io::{self};
+use std::io::{self, Read};
 use std::path::Path;
-use parquet::file::reader::{FileReader, SerializedFileReader};
-use parquet::basic::Type as PhysicalType;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Metadata {
@@ -19,12 +21,39 @@ pub struct MetadataField {
     pub is_required: bool
 }
 
+/// Supported Vine data types
+///
+/// Primitive types:
+/// - byte/tinyint: 8-bit signed integer
+/// - short/smallint: 16-bit signed integer
+/// - integer/int: 32-bit signed integer
+/// - long/bigint: 64-bit signed integer
+/// - float: 32-bit floating point
+/// - double: 64-bit floating point
+/// - boolean: true/false
+/// - string: UTF-8 text
+/// - binary: byte array
+///
+/// Date/Time types:
+/// - date: calendar date (YYYY-MM-DD)
+/// - timestamp: date and time with millisecond precision
+///
+/// Numeric types:
+/// - decimal: fixed-precision decimal (precision, scale)
 #[derive(Serialize, Deserialize, Clone)]
 pub enum Value {
-    String(String),
+    Byte(i8),
+    Short(i16),
     Int(i32),
-    Bool(bool),
+    Long(i64),
+    Float(f32),
     Double(f64),
+    Bool(bool),
+    String(String),
+    Binary(Vec<u8>),
+    Date(i32),        // Days since Unix epoch
+    Timestamp(i64),   // Milliseconds since Unix epoch
+    Decimal(String),  // String representation for precision
 }
 
 
@@ -34,6 +63,18 @@ impl Metadata {
             table_name: table_name.to_string(),
             fields: fields
         }
+    }
+
+    /// Load metadata from vine_meta.json file
+    ///
+    /// # Arguments
+    /// * `path` - Path to vine_meta.json file
+    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut file = File::open(path.as_ref())?;
+        let mut content = String::new();
+        file.read_to_string(&mut content)?;
+        let metadata: Metadata = serde_json::from_str(&content)?;
+        Ok(metadata)
     }
 
     pub fn save(&self, path: &str) -> io::Result<()> {
@@ -46,64 +87,34 @@ impl Metadata {
     // Schema-on-Read Functions
     // ========================================================================
 
-    /// Infer schema from Parquet file in directory
+    /// Infer schema from Vortex file in directory
     ///
     /// This enables schema-on-read pattern where metadata is extracted
-    /// from Parquet files instead of requiring vine_meta.json.
+    /// from Vortex files instead of requiring vine_meta.json.
     ///
     /// # Arguments
-    /// * `base_path` - Root directory containing date-partitioned Parquet files
+    /// * `base_path` - Root directory containing date-partitioned Vortex files
     ///
     /// # Returns
-    /// Metadata inferred from Parquet schema
-    pub fn infer_from_parquet<P: AsRef<Path>>(base_path: P) -> Result<Self, Box<dyn std::error::Error>> {
+    /// Metadata inferred from Vortex schema
+    pub fn infer_from_vortex<P: AsRef<Path>>(base_path: P) -> Result<Self, Box<dyn std::error::Error>> {
         let base_path = base_path.as_ref();
 
-        // Find first parquet file (scan date directories)
-        let parquet_file = Self::find_first_parquet_file(base_path)?;
-
-        // Read Parquet metadata
-        let file = File::open(&parquet_file)
-            .map_err(|e| format!("Failed to open parquet file {:?}: {}", parquet_file, e))?;
-        let reader = SerializedFileReader::new(file)
-            .map_err(|e| format!("Failed to read parquet file: {}", e))?;
-
-        let parquet_metadata = reader.metadata();
-        let schema = parquet_metadata.file_metadata().schema();
-
-        // Convert Parquet schema to Vine Metadata
-        let fields: Vec<MetadataField> = schema
-            .get_fields()
-            .iter()
-            .enumerate()
-            .map(|(i, field)| {
-                let data_type = Self::map_parquet_type_to_vine(field.get_physical_type());
-                MetadataField {
-                    id: (i + 1) as i32,
-                    name: field.name().to_string(),
-                    data_type,
-                    is_required: !field.is_optional(),
-                }
-            })
-            .collect();
-
-        if fields.is_empty() {
-            return Err("No fields found in Parquet schema".into());
-        }
-
-        Ok(Metadata {
-            table_name: "inferred".to_string(),
-            fields,
-        })
+        // Find first vortex file, and extract schema
+        // Transform Vortex DType to Vine Metadata
+        let vortex_file = Self::find_first_vortex_file(base_path)?;
+        let (dtype, _) = crate::vortex_exp::read_vortex_file(&vortex_file)
+            .map_err(|e| -> Box<dyn std::error::Error> { e })?;
+        crate::vortex_exp::dtype_to_metadata(&dtype, "inferred")
+            .map_err(|e| -> Box<dyn std::error::Error> { e })
     }
 
-    /// Find the first (or latest) Parquet file in directory tree
-    fn find_first_parquet_file(base_path: &Path) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
-        // First, check for direct .parquet files in base_path
+    /// Find the first (or latest) Vortex file in directory tree
+    fn find_first_vortex_file(base_path: &Path) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
         if let Ok(entries) = fs::read_dir(base_path) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().map_or(false, |ext| ext == "parquet") {
+                if path.extension().map_or(false, |ext| ext == "vtx") {
                     return Ok(path);
                 }
             }
@@ -122,62 +133,44 @@ impl Metadata {
             })
             .collect();
 
-        // Sort by name descending (latest date first)
+        // Sort to get latest date first
         date_dirs.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
 
         for dir_entry in date_dirs {
             let dir_path = dir_entry.path();
             if let Ok(files) = fs::read_dir(&dir_path) {
-                // Get the latest parquet file in this directory
-                let mut parquet_files: Vec<_> = files
+                // Get the latest vortex file in this directory
+                let mut vortex_files: Vec<_> = files
                     .filter_map(|e| e.ok())
                     .filter(|e| {
                         e.path()
                             .extension()
-                            .map_or(false, |ext| ext == "parquet")
+                            .map_or(false, |ext| ext == "vtx")
                     })
                     .collect();
 
                 // Sort by name descending (latest file first)
-                parquet_files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+                vortex_files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
 
-                if let Some(file_entry) = parquet_files.first() {
+                if let Some(file_entry) = vortex_files.first() {
                     return Ok(file_entry.path());
                 }
             }
         }
 
-        Err(format!("No Parquet files found in {:?}", base_path).into())
-    }
-
-    /// Map Parquet physical type to Vine data type string
-    fn map_parquet_type_to_vine(physical_type: PhysicalType) -> String {
-        match physical_type {
-            PhysicalType::INT32 => "integer".to_string(),
-            PhysicalType::INT64 => "integer".to_string(),  // Map to integer for now
-            PhysicalType::BOOLEAN => "boolean".to_string(),
-            PhysicalType::FLOAT => "double".to_string(),
-            PhysicalType::DOUBLE => "double".to_string(),
-            PhysicalType::BYTE_ARRAY => "string".to_string(),
-            PhysicalType::FIXED_LEN_BYTE_ARRAY => "string".to_string(),
-            PhysicalType::INT96 => "string".to_string(),  // Timestamp, treat as string for now
-        }
+        Err(format!("No Vortex files found in {:?}", base_path).into())
     }
 
     /// Update metadata cache asynchronously
-    ///
     /// This function updates _meta/schema.json in the background without
     /// blocking the write path.
-    ///
-    /// # Arguments
-    /// * `base_path` - Root directory
     pub fn update_cache_async<P: AsRef<Path> + Send + 'static>(base_path: P)
     where
         P: Clone,
     {
         let path = base_path.as_ref().to_path_buf();
         std::thread::spawn(move || {
-            match Self::infer_from_parquet(&path) {
+            match Self::infer_from_vortex(&path) {
                 Ok(metadata) => {
                     if let Err(e) = metadata.save_to_cache(&path) {
                         eprintln!("Warning: Failed to save metadata cache: {}", e);
@@ -223,40 +216,16 @@ impl Metadata {
     // ========================================================================
 
     /// Save metadata with version tracking
-    ///
-    /// Creates a new version entry in _meta/versions/ directory.
-    ///
-    /// # Arguments
-    /// * `base_path` - Root directory
-    /// * `operation` - Operation type (e.g., "CREATE", "ADD_COLUMN", "ROLLBACK")
-    ///
-    /// # Returns
-    /// New version number
-    ///
-    /// # Implementation TODO (Phase 2)
-    /// 1. Create _meta/versions/ directory
-    /// 2. Determine next version number
-    /// 3. Create version file with metadata + operation info
-    /// 4. Update vine_meta.json as cache
     pub fn save_versioned<P: AsRef<Path>>(
         &self,
         _base_path: P,
         _operation: &str,
     ) -> io::Result<i64> {
         // TODO: Implement versioning (Phase 2)
-        // Future: Delta Lake-style transaction log
         Ok(0)
     }
 
     /// Load specific version of metadata
-    ///
-    /// # Arguments
-    /// * `base_path` - Root directory
-    /// * `version` - Version number to load
-    ///
-    /// # Implementation TODO (Phase 2)
-    /// 1. Read _meta/versions/{version:020}.json
-    /// 2. Parse and return metadata
     pub fn load_version<P: AsRef<Path>>(
         _base_path: P,
         _version: i64,
@@ -266,15 +235,6 @@ impl Metadata {
     }
 
     /// Rollback to specific version
-    ///
-    /// # Arguments
-    /// * `base_path` - Root directory
-    /// * `target_version` - Version to rollback to
-    ///
-    /// # Implementation TODO (Phase 2)
-    /// 1. Load target version metadata
-    /// 2. Update vine_meta.json
-    /// 3. Create new version entry with operation="ROLLBACK"
     pub fn rollback<P: AsRef<Path>>(
         _base_path: P,
         _target_version: i64,

@@ -1,42 +1,52 @@
-use std::fs::{self, File};
+/// Reads data from Vortex (.vtx) files in date-partitioned directories.
+/// Caching is handled internally.
+
+use std::fs;
 use std::path::PathBuf;
+
 use chrono::NaiveDate;
-use parquet::file::reader::{FileReader, SerializedFileReader};
-use parquet::record::RowAccessor;
 
-use crate::reader_cache::ReaderCache;
+use crate::global_cache;
+use crate::metadata::Metadata;
+use crate::vortex_exp::{read_vortex_file, array_to_csv_rows};
 
-
-/// Read all data from Vine format storage (convenience function for non-JNI usage)
-/// NOTE: For JNI, 'read_vine_data_with_cache' should be used.
+/// Read all data from Vine storage
+///
+/// This is the main entry point for reading Vine data.
+/// Caching is handled internally.
+///
+/// # Arguments
+/// * `dir_path` - Base directory containing date-partitioned Vortex files
+///
+/// # Returns
+/// Vector of CSV-formatted row strings
 pub fn read_vine_data(dir_path: &str) -> Vec<String> {
-    let base_path = PathBuf::from(dir_path);
-    let cache = ReaderCache::new(base_path)
-        .unwrap_or_else(|e| panic!("Failed to initialize reader cache: {}", e));
-
-    read_vine_data_with_cache(dir_path, &cache)
+    read_vine_data_internal(dir_path)
+        .unwrap_or_else(|e| {
+            eprintln!("Error reading Vine data: {}", e);
+            Vec::new()
+        })
 }
 
-/// Read all data from Vine format storage with external cache
-///
-/// 1. Uses provided cache (from JNI layer)
-/// 2. Scans date-partitioned directories in chronological order
-/// 3. Reads Parquet files with proper type handling
-/// 4. Returns CSV-formatted rows for JNI compatibility
-///
-/// NOTE: For non-JNI, use read_vine_data() which creates its own cache.
-pub fn read_vine_data_with_cache(dir_path: &str, cache: &ReaderCache) -> Vec<String> {
+/// Internal implementation with automatic caching
+fn read_vine_data_internal(dir_path: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    // Use global cache to get metadata
+    let metadata = global_cache::get_reader_metadata(dir_path)?;
+    read_with_metadata(dir_path, &metadata)
+}
+
+/// Read data using provided metadata
+fn read_with_metadata(dir_path: &str, metadata: &Metadata) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let base_path = PathBuf::from(dir_path);
 
-    let mut row_list = Vec::new();
+    let mut all_rows = Vec::new();
     let mut directories = Vec::new();
 
     // Scan for date-partitioned directories
-    let dir_entries = fs::read_dir(&base_path)
-        .unwrap_or_else(|_| panic!("Cannot read directory: {:?}", base_path));
+    let dir_entries = fs::read_dir(&base_path)?;
 
     for entry_result in dir_entries {
-        let entry = entry_result.expect("Cannot read directory entry");
+        let entry = entry_result?;
         let path = entry.path();
 
         if path.is_dir() {
@@ -51,134 +61,35 @@ pub fn read_vine_data_with_cache(dir_path: &str, cache: &ReaderCache) -> Vec<Str
     // Sort directories by date (chronological order)
     directories.sort_by_key(|(date, _)| *date);
 
-    // Read all Parquet files from date directories
+    // Read all Vortex files from date directories
     for (_, dir_path) in directories {
-        let sub_dir = fs::read_dir(&dir_path)
-            .unwrap_or_else(|_| panic!("Cannot read directory: {:?}", dir_path));
+        let sub_dir = fs::read_dir(&dir_path)?;
 
         for file_entry_result in sub_dir {
-            let file_path = file_entry_result
-                .expect("Cannot read file entry")
-                .path();
+            let file_path = file_entry_result?.path();
 
-            // Process parquet files only
-            if file_path.extension().map_or(false, |ext| ext == "parquet") {
-                if let Err(e) = read_parquet_file(&file_path, &cache, &mut row_list) {
+            // Process .vtx files only
+            if file_path.extension().map_or(false, |ext| ext == "vtx") {
+                if let Err(e) = read_vortex_file_to_rows(&file_path, metadata, &mut all_rows) {
                     eprintln!("Warning: Failed to read file {:?}: {}", file_path, e);
-                    // Continue reading other files even if one fails
                 }
             }
         }
     }
 
-    row_list
+    Ok(all_rows)
 }
 
-/// Read single parquet file, and append rows to row_list
-fn read_parquet_file(
+/// Read single Vortex file and append rows to row_list
+fn read_vortex_file_to_rows(
     file_path: &PathBuf,
-    cache: &ReaderCache,
+    metadata: &Metadata,
     row_list: &mut Vec<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let file = File::open(file_path)?;
-    let reader = SerializedFileReader::new(file)?;
-    let row_iter = reader.get_row_iter(None)?;
-
-    for row_result in row_iter {
-        match row_result {
-            Ok(row) => {
-                // Validate column count matches metadata
-                let actual_columns = row.len();
-                if let Err(e) = cache.validate_column_count(actual_columns) {
-                    eprintln!("Warning in file {:?}: {}", file_path, e);
-                    continue;
-                }
-
-                let csv_row = parse_row_to_csv(&row, cache)?;
-                row_list.push(csv_row);
-            }
-            Err(e) => {
-                eprintln!("Warning: Failed to read row from {:?}: {}", file_path, e);
-                continue;
-            }
-        }
-    }
-
+    let (_, array) = read_vortex_file(file_path)
+        .map_err(|e| -> Box<dyn std::error::Error> { e })?;
+    let rows = array_to_csv_rows(&array, metadata)
+        .map_err(|e| -> Box<dyn std::error::Error> { e })?;
+    row_list.extend(rows);
     Ok(())
-}
-
-/// Parse a Parquet row to CSV format based on metadata schema
-///
-/// IMPORTANT: Uses field order from metadata (not field.id) to ensure
-/// consistency with writer's schema generation
-fn parse_row_to_csv(
-    row: &parquet::record::Row,
-    cache: &ReaderCache,
-) -> Result<String, Box<dyn std::error::Error>> {
-    let mut values = Vec::with_capacity(cache.field_count());
-
-    // Iterate fields in metadata order (matches writer's schema order)
-    for (col_index, field) in cache.metadata.fields.iter().enumerate() {
-        let value = match field.data_type.as_str() {
-            "integer" => {
-                match row.get_int(col_index) {
-                    Ok(v) => v.to_string(),
-                    Err(e) => {
-                        eprintln!(
-                            "Warning: Failed to read integer column '{}' at index {}: {}. Using default.",
-                            field.name, col_index, e
-                        );
-                        "0".to_string()
-                    }
-                }
-            }
-            "string" => {
-                match row.get_string(col_index) {
-                    Ok(s) => s.to_string(),
-                    Err(e) => {
-                        eprintln!(
-                            "Warning: Failed to read string column '{}' at index {}: {}. Using empty string.",
-                            field.name, col_index, e
-                        );
-                        String::new()
-                    }
-                }
-            }
-            "boolean" => {
-                match row.get_bool(col_index) {
-                    Ok(v) => v.to_string(),
-                    Err(e) => {
-                        eprintln!(
-                            "Warning: Failed to read boolean column '{}' at index {}: {}. Using default.",
-                            field.name, col_index, e
-                        );
-                        "false".to_string()
-                    }
-                }
-            }
-            "double" => {
-                match row.get_double(col_index) {
-                    Ok(v) => v.to_string(),
-                    Err(e) => {
-                        eprintln!(
-                            "Warning: Failed to read double column '{}' at index {}: {}. Using default.",
-                            field.name, col_index, e
-                        );
-                        "0.0".to_string()
-                    }
-                }
-            }
-            _ => {
-                eprintln!(
-                    "Warning: Unsupported data type '{}' for field '{}'. Using empty string.",
-                    field.data_type, field.name
-                );
-                String::new()
-            }
-        };
-
-        values.push(value);
-    }
-
-    Ok(values.join(","))
 }

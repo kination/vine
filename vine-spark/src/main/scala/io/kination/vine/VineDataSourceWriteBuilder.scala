@@ -2,7 +2,7 @@ package io.kination.vine
 
 import org.apache.spark.sql.connector.write._
 import org.apache.spark.sql.connector.write.streaming.StreamingWrite
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.types._
 
 import org.json4s._
 import org.json4s.DefaultFormats
@@ -11,29 +11,23 @@ import org.json4s.jackson.JsonMethods._
 import scala.reflect.io.File
 
 /**
-  * 
-  * TODO:
-      - Compare schema inside param-schema and info.schema
-      - Decide where should we merge/update schema
-        - By updating logical schema here, we can focus on data handling on DataWriter
-        - But because PhysicalWriteInfo not exists on this stage, we cannot handle logic base on partitioning column
-        - So there can be duplicates in future.
-  * 
-  * 
-  */
+ * WriteBuilder for DataSource V2.
+ * Handles schema management and create batch/streaming writers.
+ */
 class VineDataSourceWriteBuilder(schema: StructType, info: LogicalWriteInfo) extends WriteBuilder {
+
+  private val path: String = info.options().get("path")
+
   override def buildForBatch(): BatchWrite = {
     val updatedSchema = updateSchema(schema, info)
-    new VineDataSourceWriter(updatedSchema, info)
+    new VineDataSourceWriter(updatedSchema, info, path)
   }
 
   override def buildForStreaming(): StreamingWrite = super.buildForStreaming()
 
-  // TODO: update schema by comparing 2 data
   private def updateSchema(tableSchema: StructType, info: LogicalWriteInfo): StructType = {
-    val schemaFile = info.options().get("path")
-    val metaPath = s"$schemaFile/vine_meta.json"
-    
+    val metaPath = s"$path/vine_meta.json"
+
     if (File(metaPath).exists) {
       tableSchema
     } else {
@@ -42,43 +36,69 @@ class VineDataSourceWriteBuilder(schema: StructType, info: LogicalWriteInfo) ext
     }
   }
 
-  private def createNewMetadataFile(info: LogicalWriteInfo) {
-    val path = info.options().get("path")
+  /**
+   * Create vine_meta.json with 'Vortex-compatible' type mappings.
+   * Maps Spark types to Vine/Vortex types
+   */
+  private def createNewMetadataFile(info: LogicalWriteInfo): Unit = {
     val metaPath = s"$path/vine_meta.json"
-    
+
+    // Ensure directory exists
+    val dir = new java.io.File(path)
+    if (!dir.exists()) {
+      dir.mkdirs()
+    }
+
     implicit val formats: DefaultFormats.type = DefaultFormats
     val fields = info.schema().fields.zipWithIndex.map { case (field, index) =>
       Map(
         "id" -> (index + 1),
         "name" -> field.name,
-        "data_type" -> field.dataType.typeName,
+        "data_type" -> sparkTypeToVineType(field.dataType),
         "is_required" -> !field.nullable
       )
     }
-    
+
     val schemaJson = compact(render(
       Extraction.decompose(Map(
         "table_name" -> path,
         "fields" -> fields
       ))
     ))
-    
+
     new java.io.PrintWriter(metaPath) { write(schemaJson); close() }
-  
+  }
+
+  /**
+   * Map Spark DataType to Vine/Vortex type string.
+   */
+  private def sparkTypeToVineType(dataType: DataType): String = {
+    VineTypeUtils.sparkTypeToVineType(dataType)
   }
 }
 
-class VineDataSourceWriter(schema: StructType, info: LogicalWriteInfo) extends BatchWrite {
+/**
+ * BatchWrite implementation
+ * This creates 'VineDataWriterFactory' for each partition
+ */
+class VineDataSourceWriter(
+    schema: StructType,
+    info: LogicalWriteInfo,
+    path: String
+) extends BatchWrite {
 
-  override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
-    new VineDataWriterFactory(schema, info)
+  override def createBatchWriterFactory(physicalInfo: PhysicalWriteInfo): DataWriterFactory = {
+    new VineDataWriterFactory(schema, physicalInfo, path)
   }
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {
-
+    // Log commit statistics if needed
+    val totalRows = messages.collect {
+      case msg: VineWriterCommitMessage => msg.rowsWritten
+    }.sum
   }
 
   override def abort(messages: Array[WriterCommitMessage]): Unit = {
-
+    // Nothing to clean up - partial writes are acceptable in append mode
   }
 }

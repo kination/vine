@@ -1,0 +1,11 @@
+event_id,event_name,user_id,timestamp,is_active
+1,login,101,1703001600000,true
+2,view_page,101,1703002200000,true
+3,click_button,102,1703002800000,true
+4,logout,101,1703003400000,false
+5,login,103,1703004000000,true
+6,purchase,102,1703004600000,true
+7,view_page,103,1703005200000,true
+8,logout,102,1703005800000,false
+9,login,104,1703006400000,true
+10,click_button,104,1703007000000,true

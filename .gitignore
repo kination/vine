@@ -5,5 +5,6 @@
 .metals/
 .scala-build/
 
-.private-doc/
+.internal-doc/
+.public-doc/
 

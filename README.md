@@ -1,8 +1,8 @@
-# Vine - Write-Optimized Datalake Format (WIP)
+# Vine - Datalake Format base on Rust (WIP)
 
 > **Status**: Work in Progress
 
-This project aimes 'datalake table format' optimized for **streaming data writes**, built on Rust for high performance. 
+This project aimes 'datalake table format' optimized for `streaming data writes`, built on Rust. 
 
 ## Quick Start
 
@@ -13,7 +13,7 @@ This project aimes 'datalake table format' optimized for **streaming data writes
 ```
 
 This builds:
-- `vine-core`: Rust library for Parquet I/O
+- `vine-core`: Rust library for Vine
 - `vine-spark`: Spark DataSource V2 connector
 
 ### Usage with Spark
@@ -95,6 +95,6 @@ sbt clean assembly
 
 ### Requirements
 
-- Rust 1.70+ (for vine-core)
-- Scala 2.13, sbt 1.x (for vine-spark)
-- Java 11+ (for Spark/Trino connectors)
+- Rust 1.70+
+- Scala 2.13, sbt 1.x
+- Java 11

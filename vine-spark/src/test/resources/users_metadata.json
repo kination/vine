@@ -1,0 +1,29 @@
+{
+  "table_name": "users",
+  "fields": [
+    {
+      "id": 1,
+      "name": "id",
+      "data_type": "integer",
+      "is_required": true
+    },
+    {
+      "id": 2,
+      "name": "name",
+      "data_type": "string",
+      "is_required": true
+    },
+    {
+      "id": 3,
+      "name": "age",
+      "data_type": "integer",
+      "is_required": true
+    },
+    {
+      "id": 4,
+      "name": "score",
+      "data_type": "double",
+      "is_required": true
+    }
+  ]
+}
