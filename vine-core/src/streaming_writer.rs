@@ -18,6 +18,7 @@ use crate::writer_config::WriterConfig;
 /// - Automatic file rotation
 ///
 /// Caching is handled internally.
+#[deprecated]
 pub struct StreamingWriter {
     base_path: PathBuf,
     metadata: Metadata,
@@ -25,6 +26,7 @@ pub struct StreamingWriter {
     buffer: Vec<String>,
 }
 
+#[deprecated]
 impl StreamingWriter {
     /// Create new streaming writer
     ///

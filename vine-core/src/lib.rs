@@ -2,6 +2,7 @@ pub mod metadata;
 pub mod writer_config;
 pub mod writer_cache;
 pub mod streaming_writer;
+pub mod streaming_writer_v2;
 pub mod vine_batch_writer;
 pub mod vine_streaming_writer;
 pub mod storage_writer;
