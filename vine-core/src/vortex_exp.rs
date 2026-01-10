@@ -280,7 +280,9 @@ pub async fn write_vortex_file_async<P: AsRef<Path>>(
 }
 
 /// Build a StructArray from rows based on metadata schema
-fn build_struct_array(metadata: &Metadata, rows: &[&str]) -> VortexResult<ArrayRef> {
+///
+/// **Public** for use by streaming_writer_v2
+pub fn build_struct_array(metadata: &Metadata, rows: &[&str]) -> VortexResult<ArrayRef> {
     if metadata.fields.is_empty() {
         return Err("Metadata must have at least one field".into());
     }

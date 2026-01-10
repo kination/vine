@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use crate::streaming_writer::StreamingWriter;
+// use crate::streaming_writer::StreamingWriter;
+use crate ::streaming_writer_v2::StreamingWriterV2 as StreamingWriter;
 use crate::writer_config::WriterConfig;
 
 
@@ -33,7 +34,8 @@ impl VineStreamingWriter {
 
     /// Flush pending writes (closes current file, opens new file on next write)
     pub fn flush(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        self.inner.flush()
+        self.inner.flush()?;
+        Ok(())
     }
 
     /// Close the writer and finalize all pending writes
