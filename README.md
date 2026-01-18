@@ -37,7 +37,7 @@ df.show()
 
 ```
 ┌─────────────────────────────────────┐
-│   Query Engines (Spark, Trino)     │
+│   Query Engines (Spark, Trino)      │
 └──────────────┬──────────────────────┘
                │ DataSource API
 ┌──────────────▼──────────────────────┐
@@ -46,14 +46,14 @@ df.show()
                │ JNI
 ┌──────────────▼──────────────────────┐
 │  Rust Core (vine-core)              │
-│  - Fast Parquet writes              │
+│  - Fast 'vortex' writes             │
 │  - Date-based partitioning          │
 └──────────────┬──────────────────────┘
                │
 ┌──────────────▼──────────────────────┐
-│  Storage (Parquet files)            │
-│  2024-12-26/data_143025.parquet     │
-│  2024-12-27/data_091500.parquet     │
+│  Storage (vortex files)             │
+│  2024-12-26/data_143025.vtx         │
+│  2024-12-27/data_091500.vtx         │
 └─────────────────────────────────────┘
 ```
 
@@ -67,8 +67,8 @@ df.show()
 
 ## Storage Format
 
-- **Files**: Apache Parquet (columnar)
-- **Partitioning**: Date-based directories (`YYYY-MM-DD/data_HHMMSS.parquet`)
+- **Files**: [Vortex](https://github.com/vortex-data/vortex)
+- **Partitioning**: Date-based directories (`YYYY-MM-DD/data_HHMMSS.vtx`)
 - **Metadata**: JSON schema file (`vine_meta.json`)
 - **Types**: integer, string, boolean, double
 
