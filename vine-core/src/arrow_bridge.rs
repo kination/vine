@@ -53,10 +53,9 @@ pub fn serialize_arrow_ipc(batch: &RecordBatch) -> Result<Vec<u8>, ArrowError> {
 
 /// Convert Vine metadata to Arrow schema
 ///
-/// # Deprecated
-/// This is only used by the deprecated CSV bridge functions.
+/// # Note
+/// This is used by the CSV bridge functions (csv_rows_to_record_batch).
 /// Will be removed when direct Arrow->Vortex conversion is implemented.
-#[deprecated(since = "0.2.0", note = "Only used by CSV bridge. Will be removed with direct Arrow->Vortex conversion.")]
 fn metadata_to_arrow_schema(metadata: &Metadata) -> ArrowBridgeResult<Schema> {
     let fields: Vec<Field> = metadata
         .fields
@@ -129,13 +128,13 @@ fn arrow_type_to_vine(arrow_type: &DataType) -> String {
 
 /// Convert RecordBatch to CSV rows for Vortex writer
 ///
-/// # Deprecated
+/// # Note
 /// This function is a temporary bridge between Arrow IPC and CSV-based Vortex writer.
+/// Currently used by Arrow IPC JNI functions (batchWriteArrow, streamingAppendBatchArrow).
 /// Will be replaced with direct Arrow → Vortex conversion in v0.3.0.
 ///
 /// This bridges Arrow IPC data to the existing Vortex writer that expects CSV.
-/// Future optimization: Direct Arrow -> Vortex conversion without CSV intermediate.
-#[deprecated(since = "0.2.0", note = "Temporary CSV bridge. Direct Arrow->Vortex conversion coming in v0.3.0. Adds 20-30% overhead.")]
+/// Future optimization: Direct Arrow -> Vortex conversion without CSV intermediate (20-30% overhead reduction).
 pub fn record_batch_to_csv_rows(batch: &RecordBatch) -> ArrowBridgeResult<Vec<String>> {
     let num_rows = batch.num_rows();
     let num_cols = batch.num_columns();
@@ -158,10 +157,11 @@ pub fn record_batch_to_csv_rows(batch: &RecordBatch) -> ArrowBridgeResult<Vec<St
 
 /// Convert CSV rows to RecordBatch for JNI return
 ///
-/// # Deprecated
+/// # Note
 /// This function is a temporary bridge between CSV-based reader and Arrow IPC.
-/// It has be replaced with direct 'Vortex → Arrow' conversion since v0.3.0.
-#[deprecated(since = "0.2.0", note = "Temporary CSV bridge. Direct Vortex->Arrow conversion coming in v0.3.0. Adds 20-30% overhead.")]
+/// Currently used by Arrow IPC JNI function (readDataArrow).
+/// Will be replaced with direct Vortex → Arrow conversion in v0.3.0.
+/// Adds 20-30% overhead compared to direct conversion.
 pub fn csv_rows_to_record_batch(
     rows: &[String],
     metadata: &Metadata,
