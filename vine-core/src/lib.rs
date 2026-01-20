@@ -5,7 +5,6 @@ pub mod streaming_writer;
 pub mod streaming_writer_v2;
 pub mod vine_batch_writer;
 pub mod vine_streaming_writer;
-pub mod storage_writer;
 pub mod reader_cache;
 pub mod storage_reader;
 pub mod global_cache;
@@ -18,7 +17,6 @@ use jni::JNIEnv;
 use jni::objects::{JClass, JString};
 use jni::sys::jobject;
 
-use storage_writer::write_data;
 use vine_batch_writer::VineBatchWriter;
 use vine_streaming_writer::VineStreamingWriter;
 use storage_reader::read_vine_data;
@@ -66,50 +64,10 @@ pub extern "C" fn Java_io_kination_vine_VineModule_readDataFromVine(
 // ============================================================================
 // Batch Writer JNI Functions
 // ============================================================================
-
-/// Write data to Vine storage
-///
-/// # Deprecated
-/// This function uses CSV string format which is inefficient.
-/// Use `Java_io_kination_vine_VineModule_batchWriteArrow` instead for 5-10x better performance.
-/// CSV support will be removed in v0.5.0.
-#[deprecated(since = "0.2.0", note = "Use batchWriteArrow instead. CSV format is 5-10x slower than Arrow IPC. Will be removed in v0.5.0")]
-#[no_mangle]
-#[allow(non_snake_case)]
-#[allow(unused_variables)]
-pub extern "C" fn Java_io_kination_vine_VineModule_writeDataToVine(
-    mut env: JNIEnv,
-    class: JClass,
-    path: JString,
-    data: JString,
-) {
-    let path_str: String = env.get_string(&path).expect("Fail getting path").into();
-    let data_str: String = env.get_string(&data).expect("Fail getting data").into();
-    let rows: Vec<&str> = data_str.lines().collect();
-    write_data(&path_str, &rows).expect("Failed to write data");
-}
-
-/// Batch write data
-///
-/// # Deprecated
-/// This function uses CSV string format which is inefficient.
-/// Use `Java_io_kination_vine_VineModule_batchWriteArrow` instead for 5-10x better performance.
-/// CSV support will be removed in v0.5.0.
-#[deprecated(since = "0.2.0", note = "Use batchWriteArrow instead. CSV format is 5-10x slower than Arrow IPC. Will be removed in v0.5.0")]
-#[no_mangle]
-#[allow(non_snake_case)]
-#[allow(unused_variables)]
-pub extern "C" fn Java_io_kination_vine_VineModule_batchWrite(
-    mut env: JNIEnv,
-    class: JClass,
-    path: JString,
-    data: JString,
-) {
-    let path_str: String = env.get_string(&path).expect("Fail getting path").into();
-    let data_str: String = env.get_string(&data).expect("Fail getting data").into();
-    let rows: Vec<&str> = data_str.lines().collect();
-    VineBatchWriter::write(&path_str, &rows).expect("Failed to batch write");
-}
+//
+// Note: CSV-based batch write functions have been removed in favor of Arrow IPC.
+// Use batchWriteArrow for better performance (5-10x faster than CSV format).
+// ============================================================================
 
 // ============================================================================
 // Streaming Writer JNI Functions
@@ -140,32 +98,6 @@ pub extern "C" fn Java_io_kination_vine_VineModule_createStreamingWriter(
     id
 }
 
-/// Append batch to existing streaming writer
-///
-/// # Deprecated
-/// This function uses CSV string format which is inefficient.
-/// Use `Java_io_kination_vine_VineModule_streamingAppendBatchArrow` instead for 5-10x better performance.
-/// CSV support will be removed in v0.5.0.
-#[deprecated(since = "0.2.0", note = "Use streamingAppendBatchArrow instead. CSV format is 5-10x slower than Arrow IPC. Will be removed in v0.5.0")]
-#[no_mangle]
-#[allow(non_snake_case)]
-#[allow(unused_variables)]
-pub extern "C" fn Java_io_kination_vine_VineModule_streamingAppendBatch(
-    mut env: JNIEnv,
-    class: JClass,
-    writer_id: jni::sys::jlong,
-    data: JString,
-) {
-    let data_str: String = env.get_string(&data).expect("Fail getting data").into();
-    let rows: Vec<&str> = data_str.lines().collect();
-
-    let mut writers = STREAMING_WRITERS.lock().unwrap();
-    if let Some(writer) = writers.get_mut(&writer_id) {
-        writer.append_batch(&rows).expect("Failed to append batch");
-    } else {
-        panic!("Writer ID {} not found", writer_id);
-    }
-}
 
 /// Flush streaming writer
 #[no_mangle]
@@ -205,14 +137,20 @@ pub extern "C" fn Java_io_kination_vine_VineModule_streamingClose(
 // Arrow IPC JNI Functions
 // ============================================================================
 
-use arrow_bridge::{deserialize_arrow_ipc, serialize_arrow_ipc, record_batch_to_csv_rows, csv_rows_to_record_batch};
+use arrow_bridge::{deserialize_arrow_ipc, serialize_arrow_ipc, arrow_to_storage_format, storage_format_to_arrow};
 use metadata::Metadata;
 
 /// Batch write data using Arrow IPC format
 ///
 /// This function receives Arrow IPC bytes from JVM, deserializes to RecordBatch,
-/// converts to CSV (temporary), and writes via existing Vortex writer.
+/// converts to storage format (currently CSV), and writes via Vortex writer.
 ///
+/// TODO: 
+/// Update arrow_to_storage_format() to make direct Arrow → Vortex conversion
+/// Migration process (when Vortex API is ready)
+///     1. Update arrow_bridge::arrow_to_storage_format() to use direct Arrow → Vortex
+///     2. Update VineBatchWriter to accept Vortex arrays instead of CSV
+///     3. No changes needed in this function - it will automatically benefit
 #[no_mangle]
 #[allow(non_snake_case)]
 #[allow(unused_variables)]
@@ -242,24 +180,30 @@ pub extern "C" fn Java_io_kination_vine_VineModule_batchWriteArrow(
     let batch = deserialize_arrow_ipc(byte_slice)
         .expect("Failed to deserialize Arrow IPC");
 
-    // Convert to CSV rows for existing Vortex writer
-    // TODO: Direct Arrow -> Vortex conversion for maximum performance
-    let csv_rows = record_batch_to_csv_rows(&batch)
-        .expect("Failed to convert RecordBatch to CSV");
+    // Convert Arrow to storage format (currently CSV, future: direct Vortex)
+    // TODO: This will automatically use direct conversion once arrow_to_storage_format() is updated
+    let storage_data = arrow_to_storage_format(&batch)
+        .expect("Failed to convert Arrow to storage format");
 
-    let rows_refs: Vec<&str> = csv_rows.iter().map(|s| s.as_str()).collect();
+    let rows_refs: Vec<&str> = storage_data.iter().map(|s| s.as_str()).collect();
 
-    // Use existing batch writer
+    // Write to storage
+    // TODO: Update VineBatchWriter to accept Vortex arrays when direct conversion is ready
     VineBatchWriter::write(&path_str, &rows_refs)
         .expect("Failed to batch write");
 }
 
-/// Read data and return as Arrow IPC format (preferred over CSV)
+/// Read data and return as Arrow IPC format
 ///
 /// This function reads from Vortex storage, converts to Arrow RecordBatch,
 /// serializes to Arrow IPC bytes, and returns to JVM.
 ///
-/// Performance improvement: 5-10x faster than CSV string transfer
+/// TODO: 
+/// Update storage_format_to_arrow() to make direct Vortex → Arrow conversion
+/// Migration path (when Vortex API is ready)
+///     1. Update storage reader to return Vortex arrays instead of CSV
+///     2. Update arrow_bridge::storage_format_to_arrow() to use direct Vortex → Arrow
+///     3. No changes needed in this function - it will automatically benefit
 #[no_mangle]
 #[allow(non_snake_case)]
 #[allow(unused_variables)]
@@ -275,19 +219,20 @@ pub extern "C" fn Java_io_kination_vine_VineModule_readDataArrow(
     let metadata = Metadata::load(&meta_path)
         .expect("Failed to load metadata");
 
-    // Read data using existing reader (returns CSV strings)
-    let csv_rows: Vec<String> = read_vine_data(&path);
+    // Read from storage (currently returns CSV, future: will return Vortex arrays)
+    // TODO: Update read_vine_data() to return Vortex arrays when direct conversion is ready
+    let storage_data: Vec<String> = read_vine_data(&path);
 
-    if csv_rows.is_empty() {
+    if storage_data.is_empty() {
         // Return empty byte array
         return env.new_byte_array(0)
             .expect("Failed to create empty byte array")
             .into_raw();
     }
 
-    // Convert CSV rows to RecordBatch
-    let batch = csv_rows_to_record_batch(&csv_rows, &metadata)
-        .expect("Failed to convert CSV to RecordBatch");
+    // Convert storage format to Arrow (currently from CSV, future: direct from Vortex)
+    let batch = storage_format_to_arrow(&storage_data, &metadata)
+        .expect("Failed to convert storage format to Arrow");
 
     // Serialize to Arrow IPC bytes
     let arrow_bytes = serialize_arrow_ipc(&batch)
@@ -306,6 +251,13 @@ pub extern "C" fn Java_io_kination_vine_VineModule_readDataArrow(
 }
 
 /// Append batch to streaming writer using Arrow IPC format
+///
+/// TODO: 
+/// Update arrow_to_storage_format() to make direct Arrow → Vortex conversion
+/// Migration path (when Vortex API is ready)
+///     1. Update arrow_bridge::arrow_to_storage_format() to use direct Arrow → Vortex
+///     2. Update VineStreamingWriter to accept Vortex arrays instead of CSV
+/// 3. No changes needed in this function - it will automatically benefit
 #[no_mangle]
 #[allow(non_snake_case)]
 #[allow(unused_variables)]
@@ -333,13 +285,14 @@ pub extern "C" fn Java_io_kination_vine_VineModule_streamingAppendBatchArrow(
     let batch = deserialize_arrow_ipc(byte_slice)
         .expect("Failed to deserialize Arrow IPC");
 
-    // Convert to CSV rows for existing writer
-    let csv_rows = record_batch_to_csv_rows(&batch)
-        .expect("Failed to convert RecordBatch to CSV");
+    // Convert Arrow to storage format (currently CSV, future: direct Vortex)
+    let storage_data = arrow_to_storage_format(&batch)
+        .expect("Failed to convert Arrow to storage format");
 
-    let rows_refs: Vec<&str> = csv_rows.iter().map(|s| s.as_str()).collect();
+    let rows_refs: Vec<&str> = storage_data.iter().map(|s| s.as_str()).collect();
 
     // Use existing streaming writer
+    // TODO: Update VineStreamingWriter to accept Vortex arrays when direct conversion is ready
     let mut writers = STREAMING_WRITERS.lock().unwrap();
     if let Some(writer) = writers.get_mut(&writer_id) {
         writer.append_batch(&rows_refs).expect("Failed to append batch");

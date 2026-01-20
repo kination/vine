@@ -848,3 +848,122 @@ pub fn write_vine_vortex_data<P: AsRef<Path>>(
     write_vortex_file(&file_path, &metadata, rows)
 }
 
+// ============================================================================
+// Helper functions for direct Arrow ↔ Vortex conversion
+// ============================================================================
+//
+// TODO: Part of direct Arrow ↔ Vortex conversion (currently disabled)
+// See arrow_bridge.rs for status and implementation plan
+//
+
+#[cfg(feature = "direct-vortex-conversion")]
+/// Extract string value from Vortex array at given index
+///
+/// **TODO: Currently unused - part of direct conversion implementation**
+///
+/// Used by Arrow bridge for direct Vortex → Arrow conversion
+pub fn extract_string_value(array: &ArrayRef, index: usize) -> VortexResult<String> {
+    use vortex::ToCanonical;
+
+    if !array.is_valid(index) {
+        return Ok(String::new());
+    }
+
+    // Convert to canonical VarBin form
+    let canonical = array.to_canonical()
+        .map_err(|e| format!("Failed to convert to canonical: {}", e))?;
+
+    // Try to extract as VarBin (string)
+    if let Ok(varbin) = canonical.as_varbin_view() {
+        if let Some(bytes) = varbin.bytes_at(index) {
+            return String::from_utf8(bytes.into())
+                .map_err(|e| format!("Failed to decode UTF-8: {}", e).into());
+        }
+    }
+
+    Ok(String::new())
+}
+
+#[cfg(feature = "direct-vortex-conversion")]
+/// Extract binary value from Vortex array at given index
+///
+/// **TODO: Currently unused - part of direct conversion implementation**
+///
+/// Used by Arrow bridge for direct Vortex → Arrow conversion
+pub fn extract_binary_value(array: &ArrayRef, index: usize) -> VortexResult<Vec<u8>> {
+    use vortex::ToCanonical;
+
+    if !array.is_valid(index) {
+        return Ok(Vec::new());
+    }
+
+    // Convert to canonical VarBin form
+    let canonical = array.to_canonical()
+        .map_err(|e| format!("Failed to convert to canonical: {}", e))?;
+
+    // Try to extract as VarBin (binary)
+    if let Ok(varbin) = canonical.as_varbin_view() {
+        if let Some(bytes) = varbin.bytes_at(index) {
+            return Ok(bytes.into());
+        }
+    }
+
+    Ok(Vec::new())
+}
+
+#[cfg(feature = "direct-vortex-conversion")]
+/// Write Vortex array directly to file (no CSV conversion)
+///
+/// **TODO: Currently unused - part of direct conversion implementation**
+///
+/// This is used by the direct Arrow → Vortex path.
+/// Accepts a Vortex StructArray and writes it directly to a .vtx file.
+pub fn write_vortex_array<P: AsRef<Path>>(
+    file_path: P,
+    vortex_array: &ArrayRef,
+) -> VortexResult<u64> {
+    let rt = Runtime::new()?;
+    let session = create_session();
+
+    rt.block_on(async {
+        let write_options = session.default_write_options();
+        let file = session.create(file_path.as_ref()).await?;
+        let mut writer = write_options.open(file).await?;
+
+        writer.write_array_columns(vortex_array.clone()).await?;
+
+        let layout_size = writer.finalize().await?;
+        Ok(layout_size)
+    })
+}
+
+#[cfg(feature = "direct-vortex-conversion")]
+/// Write Vortex array to date-partitioned Vine storage (direct, no CSV)
+///
+/// **TODO: Currently unused - part of direct conversion implementation**
+///
+/// This is the optimized write path that accepts Vortex arrays directly.
+/// Used by Arrow IPC functions for maximum performance.
+pub fn write_vine_vortex_array<P: AsRef<Path>>(
+    base_path: P,
+    vortex_array: &ArrayRef,
+) -> VortexResult<u64> {
+    use std::fs;
+    use chrono::Local;
+
+    let base = base_path.as_ref();
+
+    // Create date partition directory
+    let date_str = Local::now().format("%Y-%m-%d").to_string();
+    let partition_dir = base.join(&date_str);
+    fs::create_dir_all(&partition_dir)
+        .map_err(|e| format!("Failed to create partition dir: {}", e))?;
+
+    // Generate filename with microsecond precision
+    let timestamp = Local::now().format("%H%M%S_%f").to_string();
+    let file_path = partition_dir.join(format!("data_{}.vtx", timestamp));
+
+    // Write directly
+    write_vortex_array(&file_path, vortex_array)
+}
+
