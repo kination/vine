@@ -9,44 +9,35 @@ import org.json4s.jackson.JsonMethods._
 import scala.io.Source
 
 /**
- * Reader for Vine tables
- * Provides methods to read Vine table into Spark DataFrame.
+ * Reader for Vine tables.
  */
 object VineReader {
 
   /**
-   * Read Vine table as DataFrame.
-   * Schema is inferred from vine_meta.json if exists.
+   * Read Vine table as DataFrame, using Arrow IPC format.
+   * Schema is inferred from "vine_meta.json".
    *
    * @param spark SparkSession
    * @param path Directory path to Vine table
    * @return DataFrame containing the data
    */
   def read(spark: SparkSession, path: String): DataFrame = {
-    // Try to read schema from vine_meta.json
+    // Read schema from vine_meta.json
     val metaPath = s"$path/vine_meta.json"
     val schemaOpt = readSchemaFromMeta(metaPath)
 
     schemaOpt match {
       case Some(schema) => read(spark, path, schema)
       case None =>
-        // Fallback to inference
-        val csvData = VineModule.readDataFromVine(path)
-        if (csvData == null || csvData.trim.isEmpty) {
-          spark.emptyDataFrame
-        } else {
-          import spark.implicits._
-          val lines = csvData.split("\n").toSeq
-          spark.read
-            .option("inferSchema", "true")
-            .option("header", "false")
-            .csv(lines.toDS())
-        }
+        throw new IllegalArgumentException(
+          s"Schema file not found at $metaPath. " +
+          "Vine tables require vine_meta.json to get schema definition."
+        )
     }
   }
 
   /**
-   * Read Vine table with explicit schema.
+   * Read Vine table with explicit schema using Arrow IPC format.
    *
    * @param spark SparkSession
    * @param path Directory path to Vine table
@@ -54,28 +45,24 @@ object VineReader {
    * @return DataFrame containing the data
    */
   def read(spark: SparkSession, path: String, schema: StructType): DataFrame = {
-    val csvData = VineModule.readDataFromVine(path)
+    val arrowBytes = VineModule.readDataArrow(path)
 
-    if (csvData == null || csvData.trim.isEmpty) {
+    if (arrowBytes == null || arrowBytes.isEmpty) {
       return spark.createDataFrame(spark.sparkContext.emptyRDD[Row], schema)
     }
 
-    import spark.implicits._
-    val lines = csvData.split("\n").toSeq
-    spark.read
-      .schema(schema)
-      .option("header", "false")
-      .csv(lines.toDS())
+    val rows = VineArrowBridge.arrowIpcToRows(arrowBytes, schema)
+    spark.createDataFrame(spark.sparkContext.parallelize(rows), schema)
   }
 
   /**
-   * Read Vine table as raw CSV string.
+   * Read Vine table as raw Arrow IPC bytes.
    *
    * @param path Directory path to Vine table
-   * @return CSV-formatted data (one row per line)
+   * @return Arrow IPC stream bytes
    */
-  def readRaw(path: String): String = {
-    VineModule.readDataFromVine(path)
+  def readRaw(path: String): Array[Byte] = {
+    VineModule.readDataArrow(path)
   }
 
   /**

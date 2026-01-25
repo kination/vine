@@ -5,11 +5,10 @@ import org.apache.spark.sql.types.StructType
 
 
 /**
- * Streaming writer for incremental data ingestion to Vine tables
+ * Streaming writer for incremental data ingestion to Vine tables.
  *
- * Optimized for continuous data streams where batches arrive over time.
+ * Optimized for 'continuous data streams' where batches arrive over time.
  * Supports explicit control over flushing and file rotation.
- * 
  */
 class VineStreamingWriter(path: String) extends AutoCloseable {
 
@@ -17,26 +16,30 @@ class VineStreamingWriter(path: String) extends AutoCloseable {
   private var closed = false
 
   /**
-   * Append DataFrame batch to stream.
+   * Append DataFrame batch to stream using Arrow IPC format.
    *
    * @param df DataFrame to append
    */
   def appendBatch(df: DataFrame): Unit = {
     ensureOpen()
-    val data = formatDataFrame(df)
-    VineModule.streamingAppendBatch(writerId, data)
+    val rows = df.collect().toSeq
+    if (rows.nonEmpty) {
+      appendRows(rows, df.schema)
+    }
   }
 
   /**
-   * Append rows batch to stream.
+   * Append rows batch to stream using Arrow IPC format.
    *
    * @param rows Rows to append
    * @param schema Schema of the rows
    */
   def appendRows(rows: Seq[Row], schema: StructType): Unit = {
     ensureOpen()
-    val data = formatRows(rows, schema)
-    VineModule.streamingAppendBatch(writerId, data)
+    if (rows.isEmpty) return
+
+    val arrowBytes = VineArrowBridge.rowsToArrowIpc(rows, schema)
+    VineModule.streamingAppendBatchArrow(writerId, arrowBytes)
   }
 
   /**
@@ -55,7 +58,7 @@ class VineStreamingWriter(path: String) extends AutoCloseable {
 
   /**
    * Close the writer and finalize all pending writes.
-   * This must be called when done writing.
+   * This must be called after 'writing'.
    *
    * After closing, the writer cannot be used anymore.
    */
@@ -75,29 +78,6 @@ class VineStreamingWriter(path: String) extends AutoCloseable {
         s"VineStreamingWriter for path '$path' is already closed"
       )
     }
-  }
-
-  /**
-   * Format DataFrame to CSV string for JNI.
-   * TODO: Replace with binary format (Arrow) for better performance.
-   */
-  private def formatDataFrame(df: DataFrame): String = {
-    df.collect().map(row => formatRow(row, df.schema)).mkString("\n")
-  }
-
-  /**
-   * Format rows to CSV string for JNI.
-   */
-  private def formatRows(rows: Seq[Row], schema: StructType): String = {
-    rows.map(row => formatRow(row, schema)).mkString("\n")
-  }
-
-  /**
-   * Format a single row to CSV.
-   * Supports all Vine types.
-   */
-  private def formatRow(row: Row, schema: StructType): String = {
-    VineTypeUtils.formatRow(row, schema)
   }
 }
 

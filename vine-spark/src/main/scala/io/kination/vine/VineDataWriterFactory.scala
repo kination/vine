@@ -3,7 +3,7 @@ package io.kination.vine
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.write._
 import org.apache.spark.sql.types._
-import scala.collection.mutable.ListBuffer
+import scala.collection.mutable.ArrayBuffer
 
 /**
  * Factory to create data writers for Spark DataSource V2.
@@ -28,46 +28,42 @@ class VineDataWriter(
     path: String
 ) extends DataWriter[InternalRow] {
 
-  private val buffer = ListBuffer[String]()
-  private val bufferSize = 1000  // TODO: Optimize buffer for better performance
+  // Buffer for Arrow-based transfer (stores InternalRows)
+  private val rowBuffer = ArrayBuffer[InternalRow]()
+  private val batchSize = VineArrowConfig.DEFAULT_BATCH_SIZE
+  private var totalRowsWritten = 0
 
   override def write(record: InternalRow): Unit = {
-    val data = formatRecord(record)
-    buffer += data
+    // Copy the record since InternalRow may be reused
+    rowBuffer += record.copy()
 
-    if (buffer.size >= bufferSize) {
+    if (rowBuffer.size >= batchSize) {
       flushBuffer()
     }
   }
 
   override def commit(): WriterCommitMessage = {
-    if (buffer.nonEmpty) {
+    if (rowBuffer.nonEmpty) {
       flushBuffer()
     }
-    VineWriterCommitMessage(path, buffer.size)
+    VineWriterCommitMessage(path, totalRowsWritten)
   }
 
   override def abort(): Unit = {
-    buffer.clear()
+    rowBuffer.clear()
   }
 
   override def close(): Unit = {
-    // Nothing to do - buffer is flushed on commit
-  }
-
-  /**
-   * Format InternalRow to CSV string for JNI.
-   * Supports all Vine/Vortex types.
-   */
-  private def formatRecord(record: InternalRow): String = {
-    VineTypeUtils.formatInternalRow(record, schema)
+    // TODO: Buffer is flushed on commit
   }
 
   private def flushBuffer(): Unit = {
-    if (buffer.nonEmpty) {
-      val mergeBuffer = buffer.mkString("\n")
-      VineModule.batchWrite(path, mergeBuffer)
-      buffer.clear()
+    if (rowBuffer.nonEmpty) {
+      val arrowBytes = VineArrowBridge.internalRowsToArrowIpc(rowBuffer.toSeq, schema)
+      VineModule.batchWriteArrow(path, arrowBytes)
+
+      totalRowsWritten += rowBuffer.size
+      rowBuffer.clear()
     }
   }
 }

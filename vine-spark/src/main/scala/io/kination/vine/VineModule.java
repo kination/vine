@@ -1,10 +1,9 @@
 package io.kination.vine;
 
 /**
- * JNI bridge to Rust vine-core library with Vortex format support.
+ * JNI bridge to vine-core module
+ * Loads native library and exposes native methods.
  *
- * This module provides low-level access to native Vine functions.
- * For high-level Scala API, use VineBatchWriter, VineStreamingWriter, and VineReader classes.
  */
 public class VineModule {
     static {
@@ -12,7 +11,7 @@ public class VineModule {
     }
 
     /**
-     * Dynamically load the native library based on OS and environment.
+     * Dynamically load native library based on OS and environment.
      * Tries multiple strategies in order:
      * 1. java.library.path system property (set in build.sbt for tests)
      * 2. Relative path from project root
@@ -41,7 +40,7 @@ public class VineModule {
 
         try {
             System.loadLibrary("vine_core");
-            System.err.println("Loaded native library from java.library.path");
+            System.out.println("Loaded native library from java.library.path");
             return;
         } catch (UnsatisfiedLinkError e) {
             throw new UnsatisfiedLinkError(
@@ -50,53 +49,18 @@ public class VineModule {
         }
     }
 
-    // ============================================================================
-    // Reader JNI Functions
-    // ============================================================================
-
-    /**
-     * Read data from Vine table
-     * @param path Directory path to Vine table
-     * @return CSV-formatted data (one row per line)
-     */
-    public static native String readDataFromVine(String path);
-
-    // ============================================================================
-    // Batch Writer JNI Functions
-    // ============================================================================
-
-    /**
-     * Batch write to Vine table
-     * 
-     * @param path Directory path to Vine table
-     * @param data CSV-formatted data (one row per line)
-     */
-    public static native void batchWrite(String path, String data);
-
-    // ============================================================================
-    // Streaming Writer JNI Functions
-    // ============================================================================
-
     /**
      * Create a new streaming writer and return its ID.
      * The writer must be closed with streamingClose() when done.
-     * 
+     *
      * @param path Directory path to Vine table
      * @return Writer ID (for subsequent operations)
      */
     public static native long createStreamingWriter(String path);
 
     /**
-     * Append a batch of rows to existing streaming writer.
-     * 
-     * @param writerId Writer ID from createStreamingWriter()
-     * @param data CSV-formatted data (one row per line)
-     */
-    public static native void streamingAppendBatch(long writerId, String data);
-
-    /**
      * Flush streaming writer (closes current file, opens new on next write)
-     * 
+     *
      * @param writerId Writer ID from createStreamingWriter()
      */
     public static native void streamingFlush(long writerId);
@@ -104,8 +68,32 @@ public class VineModule {
     /**
      * Close and remove streaming writer.
      * All pending data will be flushed.
-     * 
+     *
      * @param writerId Writer ID from createStreamingWriter()
      */
     public static native void streamingClose(long writerId);
+
+    /**
+     * Read data from Vine table using Arrow IPC format.
+     *
+     * @param path Directory path to Vine table
+     * @return Arrow IPC stream bytes containing RecordBatch data
+     */
+    public static native byte[] readDataArrow(String path);
+
+    /**
+     * Batch write to Vine table using Arrow IPC format.
+     *
+     * @param path Directory path to Vine table
+     * @param arrowData Arrow IPC stream bytes containing RecordBatch data
+     */
+    public static native void batchWriteArrow(String path, byte[] arrowData);
+
+    /**
+     * Append batch of rows to streaming writer, using Arrow IPC format.
+     *
+     * @param writerId Writer ID from createStreamingWriter()
+     * @param arrowData Arrow IPC stream bytes containing RecordBatch data
+     */
+    public static native void streamingAppendBatchArrow(long writerId, byte[] arrowData);
 }
