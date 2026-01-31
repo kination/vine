@@ -47,14 +47,14 @@ df.show()
                │ JNI
 ┌──────────────▼──────────────────────┐
 │  Rust Core (vine-core)              │
-│  - Fast 'vortext' writes            │
+│  - Fast 'vortex' writes            │
 │  - Date-based partitioning          │
 └──────────────┬──────────────────────┘
                │
 ┌──────────────▼──────────────────────┐
 │  Storage (vortex files)             │
 │  2024-12-26/data_143025.vtx         │
-│  2024-12-27/data_091500.vtx.        │
+│  2024-12-27/data_091500.vtx        │
 └─────────────────────────────────────┘
 ```
 
@@ -68,8 +68,8 @@ df.show()
 
 ## Storage Format
 
-- **File**: vortex (columnar): https://github.com/vortex-data/vortex
-- **Partitioning**: Date-based directories (`YYYY-MM-DD/data_HHMMSS.parquet`)
+- **Files**: [Vortex](https://github.com/vortex-data/vortex)
+- **Partitioning**: Date-based directories (`YYYY-MM-DD/data_HHMMSS.vtx`)
 - **Metadata**: JSON schema file (`vine_meta.json`)
 - **Types**: integer, string, boolean, double
 
