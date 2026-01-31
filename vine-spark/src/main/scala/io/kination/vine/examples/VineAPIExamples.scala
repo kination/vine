@@ -133,10 +133,9 @@ object VineAPIExamples {
     println("Data with schema:")
     dfWithSchema.show()
 
-    // Read raw CSV (for debugging)
+    // Read raw Arrow IPC bytes (for debugging)
     val rawData = VineReader.readRaw("vine-data/users")
-    println("Raw CSV data:")
-    println(rawData)
+    println(s"Raw Arrow IPC data (${rawData.length} bytes)")
   }
 
   /**

@@ -32,11 +32,27 @@ Test / javaOptions ++= Seq(
 // Want to use a published library in your project?
 // You can define other libraries as dependencies in your build like this:
 
+// Spark version for Arrow compatibility
+val sparkVersion = "3.4.0"
+val arrowVersion = "14.0.2"
+val jacksonVersion = "2.14.3" // Downgrade to fix compatibility with Scala module 2.14.2
+
 libraryDependencies ++= Seq(
-    "org.apache.spark" %% "spark-sql" % "3.4.0" % Provided,
+    "org.apache.spark" %% "spark-sql" % sparkVersion % Provided,
     "org.apache.parquet" % "parquet-avro" % "1.12.0",
-    "org.scalatest" %% "scalatest" % "3.2.17" % Test
-//    "com.fasterxml.jackson.module" %% "jackson-module-scala" % "2.13.0"
+    "org.scalatest" %% "scalatest" % "3.2.17" % Test,
+    // Apache Arrow for high-performance JNI data transfer
+    "org.apache.arrow" % "arrow-vector" % arrowVersion,
+    "org.apache.arrow" % "arrow-memory-netty" % arrowVersion
+)
+
+// Force Jackson version downgrade for Spark compatibility
+// Arrow 14.0.2 brings Jackson 2.15.x, but Spark 3.4 needs 2.14.x
+dependencyOverrides ++= Seq(
+    "com.fasterxml.jackson.core" % "jackson-databind" % jacksonVersion,
+    "com.fasterxml.jackson.core" % "jackson-core" % jacksonVersion,
+    "com.fasterxml.jackson.core" % "jackson-annotations" % jacksonVersion,
+    "com.fasterxml.jackson.module" %% "jackson-module-scala" % jacksonVersion
 )
 
 assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false)

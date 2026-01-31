@@ -1,8 +1,9 @@
 # Vine - Datalake Format base on Rust (WIP)
 
-> **Status**: Work in Progress
+__This project is 'working in progress'__
 
-This project aimes 'datalake table format' optimized for `streaming data writes`, built on Rust. 
+This project aimes 'datalake table format' optimized for `streaming data writes`.
+It is built on Rust, and [vortex]()
 
 ## Quick Start
 
@@ -37,23 +38,23 @@ df.show()
 
 ```
 ┌─────────────────────────────────────┐
-│   Query Engines (Spark, Trino)     │
+│   Query Engines (Spark, Flink..)    │
 └──────────────┬──────────────────────┘
                │ DataSource API
 ┌──────────────▼──────────────────────┐
-│  Connectors (vine-spark/vine-trino) │
+│  Connectors (vine-spark/vine-flink) │
 └──────────────┬──────────────────────┘
                │ JNI
 ┌──────────────▼──────────────────────┐
 │  Rust Core (vine-core)              │
-│  - Fast Parquet writes              │
+│  - Fast 'vortext' writes            │
 │  - Date-based partitioning          │
 └──────────────┬──────────────────────┘
                │
 ┌──────────────▼──────────────────────┐
-│  Storage (Parquet files)            │
-│  2024-12-26/data_143025.parquet     │
-│  2024-12-27/data_091500.parquet     │
+│  Storage (vortex files)             │
+│  2024-12-26/data_143025.vtx         │
+│  2024-12-27/data_091500.vtx.        │
 └─────────────────────────────────────┘
 ```
 
@@ -67,7 +68,7 @@ df.show()
 
 ## Storage Format
 
-- **Files**: Apache Parquet (columnar)
+- **File**: vortex (columnar): https://github.com/vortex-data/vortex
 - **Partitioning**: Date-based directories (`YYYY-MM-DD/data_HHMMSS.parquet`)
 - **Metadata**: JSON schema file (`vine_meta.json`)
 - **Types**: integer, string, boolean, double
