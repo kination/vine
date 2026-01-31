@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 // use crate::streaming_writer::StreamingWriter;
-use crate ::streaming_writer_v2::StreamingWriterV2 as StreamingWriter;
+use crate::streaming_writer_v2::StreamingWriterV2 as StreamingWriter;
 use crate::writer_config::WriterConfig;
 
 

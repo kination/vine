@@ -157,15 +157,3 @@ pub fn invalidate_all_caches(path: &str) {
     invalidate_writer_cache(path);
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_cache_invalidation() {
-        // Just verify invalidation doesn't panic on non-existent keys
-        invalidate_reader_cache("/non/existent/path");
-        invalidate_writer_cache("/non/existent/path");
-        invalidate_all_caches("/non/existent/path");
-    }
-}

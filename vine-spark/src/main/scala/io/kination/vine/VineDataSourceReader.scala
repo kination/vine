@@ -8,16 +8,16 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 class VineDataSourceReader(options: CaseInsensitiveStringMap, schema: StructType) extends ScanBuilder {
   override def build(): Scan = {
     val rootPath = options.get("path")
-    val rawData = VineModule.readDataFromVine(f"$rootPath/result")
-    new VineDataSourceScan(rawData, schema)
+    val arrowData = VineModule.readDataArrow(f"$rootPath/result")
+    new VineDataSourceScan(arrowData, schema)
   }
 }
 
-class VineDataSourceScan(rawData: String, schema: StructType) extends Scan {
+class VineDataSourceScan(arrowData: Array[Byte], schema: StructType) extends Scan {
 
   override def readSchema(): StructType = schema
 
   override def toBatch: Batch = {
-    new VineBatchReader(rawData, schema)
+    new VineBatchReader(arrowData, schema)
   }
 }

@@ -1,10 +1,9 @@
 package io.kination.vine
 
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.expressions.GenericInternalRow
+import org.apache.spark.sql.catalyst.encoders.RowEncoder
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.connector.read.{InputPartition, PartitionReader, PartitionReaderFactory}
-import org.apache.spark.unsafe.types.UTF8String
 
 /**
  * Create Vine partition readers.
@@ -12,45 +11,29 @@ import org.apache.spark.unsafe.types.UTF8String
 class VinePartitionReaderFactory(schema: StructType) extends PartitionReaderFactory {
 
   override def createReader(partition: InputPartition): PartitionReader[InternalRow] = {
-    new VinePartitionReader(partition.asInstanceOf[VineInputPartition].rawData, schema)
+    new VinePartitionReader(partition.asInstanceOf[VineInputPartition].arrowData, schema)
   }
 }
 
 /**
- * Converts CSV data (from JNI) to InternalRows.
+ * Converts Arrow IPC data (from JNI) to InternalRows.
  * Supports all Vine/Vortex types.
  */
-class VinePartitionReader(rawData: String, schema: StructType) extends PartitionReader[InternalRow] {
+class VinePartitionReader(arrowData: Array[Byte], schema: StructType) extends PartitionReader[InternalRow] {
 
-  private val rows = rawData.split("\n").filter(_.nonEmpty).toList.map { line =>
-    line.split(",", -1).map(_.trim.stripPrefix("\"").stripSuffix("\""))
+  private val encoder = RowEncoder(schema).resolveAndBind()
+  private val internalRows = if (arrowData != null && arrowData.nonEmpty) {
+    val rows = VineArrowBridge.arrowIpcToRows(arrowData, schema)
+    rows.map(row => encoder.createSerializer().apply(row))
+  } else {
+    Seq.empty[InternalRow]
   }
 
-  private val iterator = rows.iterator
+  private val iterator = internalRows.iterator
 
   override def next(): Boolean = iterator.hasNext
 
-  override def get(): InternalRow = {
-    val fields = iterator.next()
-    val values = schema.fields.zipWithIndex.map { case (field, idx) =>
-      val value = if (idx < fields.length) fields(idx) else ""
-
-      if (value.isEmpty) {
-        null  // Handle nulls
-      } else {
-        parseValue(value, field.dataType)
-      }
-    }
-    new GenericInternalRow(values.toArray)
-  }
+  override def get(): InternalRow = iterator.next()
 
   override def close(): Unit = {}
-
-  /**
-   * Parse string value to appropriate Spark internal type.
-   * Supports all Vine/Vortex types.
-   */
-  private def parseValue(value: String, dataType: DataType): Any = {
-    VineTypeUtils.parseValue(value, dataType)
-  }
 }

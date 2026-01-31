@@ -1,8 +1,9 @@
 # Vine - Datalake Format base on Rust (WIP)
 
-> **Status**: Work in Progress
+__This project is 'working in progress'__
 
-This project aimes 'datalake table format' optimized for `streaming data writes`, built on Rust. 
+This project aimes 'datalake table format' optimized for `streaming data writes`.
+It is built on Rust, and [vortex]()
 
 ## Quick Start
 
@@ -37,23 +38,23 @@ df.show()
 
 ```
 ┌─────────────────────────────────────┐
-│   Query Engines (Spark, Trino)      │
+│   Query Engines (Spark, Flink..)    │
 └──────────────┬──────────────────────┘
                │ DataSource API
 ┌──────────────▼──────────────────────┐
-│  Connectors (vine-spark/vine-trino) │
+│  Connectors (vine-spark/vine-flink) │
 └──────────────┬──────────────────────┘
                │ JNI
 ┌──────────────▼──────────────────────┐
 │  Rust Core (vine-core)              │
-│  - Fast 'vortex' writes             │
+│  - Fast 'vortex' writes            │
 │  - Date-based partitioning          │
 └──────────────┬──────────────────────┘
                │
 ┌──────────────▼──────────────────────┐
 │  Storage (vortex files)             │
 │  2024-12-26/data_143025.vtx         │
-│  2024-12-27/data_091500.vtx         │
+│  2024-12-27/data_091500.vtx        │
 └─────────────────────────────────────┘
 ```
 

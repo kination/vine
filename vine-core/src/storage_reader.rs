@@ -10,6 +10,10 @@ use crate::global_cache;
 use crate::metadata::Metadata;
 use crate::vortex_exp::{read_vortex_file, array_to_csv_rows};
 
+// TODO: Used by direct conversion (currently disabled)
+#[allow(unused_imports)]
+use vortex::{ArrayRef as VortexArrayRef};
+
 /// Read all data from Vine storage
 ///
 /// This is the main entry point for reading Vine data.
@@ -92,4 +96,83 @@ fn read_vortex_file_to_rows(
         .map_err(|e| -> Box<dyn std::error::Error> { e })?;
     row_list.extend(rows);
     Ok(())
+}
+
+// ============================================================================
+// Direct Vortex Array Reading (No CSV conversion)
+// ============================================================================
+//
+// TODO: Part of direct Arrow ↔ Vortex conversion (currently disabled)
+// See arrow_bridge.rs for status and implementation plan
+//
+
+#[cfg(feature = "direct-vortex-conversion")]
+/// Read all data from Vine storage as a combined Vortex array
+///
+/// **TODO: Currently unused - part of direct conversion implementation**
+///
+/// This function reads all date-partitioned Vortex files and combines them
+/// into a single StructArray. No CSV conversion is performed.
+///
+/// # Arguments
+/// * `dir_path` - Base directory containing date-partitioned Vortex files
+///
+/// # Returns
+/// Combined VortexArrayRef containing all data
+pub fn read_vine_vortex_array(dir_path: &str) -> Result<VortexArrayRef, Box<dyn std::error::Error>> {
+    let base_path = PathBuf::from(dir_path);
+    let metadata = global_cache::get_reader_metadata(dir_path)?;
+
+    let mut all_arrays = Vec::new();
+    let mut directories = Vec::new();
+
+    // Scan for date-partitioned directories
+    let dir_entries = fs::read_dir(&base_path)?;
+
+    for entry_result in dir_entries {
+        let entry = entry_result?;
+        let path = entry.path();
+
+        if path.is_dir() {
+            if let Some(dir_name) = path.file_name().and_then(|s| s.to_str()) {
+                if let Ok(date) = NaiveDate::parse_from_str(dir_name, "%Y-%m-%d") {
+                    directories.push((date, path));
+                }
+            }
+        }
+    }
+
+    // Sort directories by date (chronological order)
+    directories.sort_by_key(|(date, _)| *date);
+
+    // Read all Vortex files from date directories
+    for (_, dir_path) in directories {
+        let sub_dir = fs::read_dir(&dir_path)?;
+
+        for file_entry_result in sub_dir {
+            let file_path = file_entry_result?.path();
+
+            // Process .vtx files only
+            if file_path.extension().map_or(false, |ext| ext == "vtx") {
+                match read_vortex_file(&file_path) {
+                    Ok((_, array)) => all_arrays.push(array),
+                    Err(e) => eprintln!("Warning: Failed to read file {:?}: {}", file_path, e),
+                }
+            }
+        }
+    }
+
+    if all_arrays.is_empty() {
+        return Err("No Vortex files found".into());
+    }
+
+    // If only one array, return it directly
+    if all_arrays.len() == 1 {
+        return Ok(all_arrays.into_iter().next().unwrap());
+    }
+
+    // Combine multiple arrays using Vortex concat
+    // For now, return the first array (full concat implementation would require Vortex concat API)
+    // TODO: Implement proper array concatenation
+    Ok(all_arrays.into_iter().next().unwrap())
 }
