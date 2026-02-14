@@ -36,6 +36,7 @@ Test / javaOptions ++= Seq(
 val sparkVersion = "3.4.0"
 val arrowVersion = "14.0.2"
 val jacksonVersion = "2.14.3" // Downgrade to fix compatibility with Scala module 2.14.2
+val hiveVersion = "2.3.9" // Hive Metastore version compatible with Spark 3.4
 
 libraryDependencies ++= Seq(
     "org.apache.spark" %% "spark-sql" % sparkVersion % Provided,
@@ -43,7 +44,21 @@ libraryDependencies ++= Seq(
     "org.scalatest" %% "scalatest" % "3.2.17" % Test,
     // Apache Arrow for high-performance JNI data transfer
     "org.apache.arrow" % "arrow-vector" % arrowVersion,
-    "org.apache.arrow" % "arrow-memory-netty" % arrowVersion
+    "org.apache.arrow" % "arrow-memory-netty" % arrowVersion,
+    // Hive Metastore for catalog integration
+    "org.apache.hive" % "hive-metastore" % hiveVersion % Provided excludeAll(
+      ExclusionRule(organization = "org.pentaho"),
+      ExclusionRule(organization = "org.apache.logging.log4j"),
+      ExclusionRule(organization = "org.slf4j", name = "slf4j-log4j12"),
+      ExclusionRule(organization = "log4j", name = "log4j")
+    ),
+    "org.apache.hive" % "hive-exec" % hiveVersion % Provided excludeAll(
+      ExclusionRule(organization = "org.pentaho"),
+      ExclusionRule(organization = "org.apache.logging.log4j"),
+      ExclusionRule(organization = "org.slf4j", name = "slf4j-log4j12"),
+      ExclusionRule(organization = "log4j", name = "log4j")
+    ),
+    "org.apache.thrift" % "libthrift" % "0.12.0" % Provided
 )
 
 // Force Jackson version downgrade for Spark compatibility
