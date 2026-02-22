@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
-// use crate::streaming_writer::StreamingWriter;
+use vortex::ArrayRef as VortexArrayRef;
+
 use crate::streaming_writer_v2::StreamingWriterV2 as StreamingWriter;
 use crate::writer_config::WriterConfig;
 
@@ -27,9 +28,9 @@ impl VineStreamingWriter {
         Ok(Self { inner: writer })
     }
 
-    /// Append batch of rows to the stream
-    pub fn append_batch(&mut self, rows: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
-        self.inner.write_batch(rows)
+    /// Append batch of Vortex array data to the stream
+    pub fn append_batch(&mut self, array: &VortexArrayRef) -> Result<(), Box<dyn std::error::Error>> {
+        self.inner.write_batch(array)
     }
 
     /// Flush pending writes (closes current file, opens new file on next write)

@@ -2,27 +2,23 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::Local;
+use vortex::ArrayRef as VortexArrayRef;
 
-use crate::global_cache;
-use crate::vortex_exp::write_vortex_file;
+use crate::vortex_exp::write_vortex_array;
 
 /// Batch writer for bulk data ingestion
 ///
-/// Writes all data in a single operation.
+/// Writes all data in a single operation using Vortex arrays directly.
 /// Caching is handled internally.
 pub struct VineBatchWriter;
 
 impl VineBatchWriter {
-    /// Write all data at once
+    /// Write Vortex array directly to storage
     pub fn write<P: AsRef<Path>>(
         path: P,
-        data: &[&str],
+        array: &VortexArrayRef,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let base_path: PathBuf = PathBuf::from(path.as_ref());
-        let path_str = base_path.to_str().unwrap_or("");
-
-        // Use global cache to get metadata
-        let metadata = global_cache::get_writer_metadata(path_str)?;
 
         // Create date partition directory
         let date_str = Local::now().format("%Y-%m-%d").to_string();
@@ -34,7 +30,7 @@ impl VineBatchWriter {
         let file_path = partition_dir.join(format!("data_{}.vtx", timestamp));
 
         // Write Vortex file
-        write_vortex_file(&file_path, &metadata, data)
+        write_vortex_array(&file_path, array)
             .map_err(|e| -> Box<dyn std::error::Error> { e })?;
 
         Ok(())

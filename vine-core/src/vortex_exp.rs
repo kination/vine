@@ -1,7 +1,6 @@
 /// Provides Vortex-based file I/O for Vine.
 /// - DType conversion between Vine metadata and Vortex
 /// - File read/write with date partitioning
-/// - CSV ↔ Vortex array conversion for JNI
 ///
 use std::path::Path;
 
@@ -239,7 +238,7 @@ pub fn create_session() -> VortexSession {
 /// # Arguments
 /// * `path` - Output file path
 /// * `metadata` - Vine metadata schema
-/// * `rows` - Data rows as CSV-like strings (comma-separated values)
+/// * `rows` - Data rows as comma-separated strings
 ///
 /// # Example
 /// ```ignore
@@ -392,7 +391,7 @@ fn build_typed_array(type_str: &str, values: &[&str]) -> VortexResult<ArrayRef> 
             Ok(builder.finish().into_array())
         }
 
-        // Binary (base64 encoded in CSV)
+        // Binary (base64 encoded)
         "binary" => {
             let mut builder = VarBinViewBuilder::with_capacity(
                 DType::Binary(Nullability::Nullable),
@@ -533,391 +532,13 @@ pub fn get_row_count(array: &ArrayRef) -> usize {
     array.len()
 }
 
-/// Extract column values as strings based on type
-fn extract_column_values(child: &ArrayRef, type_str: &str, num_rows: usize) -> Vec<String> {
-    use vortex::ToCanonical;
-
-    match type_str.to_lowercase().as_str() {
-        // Integer types
-        "byte" | "tinyint" => {
-            let prim = child.to_primitive();
-            (0..num_rows)
-                .map(|i| {
-                    let val: i8 = prim.scalar_at(i).as_ref().try_into().unwrap_or(0);
-                    val.to_string()
-                })
-                .collect()
-        }
-        "short" | "smallint" => {
-            let prim = child.to_primitive();
-            (0..num_rows)
-                .map(|i| {
-                    let val: i16 = prim.scalar_at(i).as_ref().try_into().unwrap_or(0);
-                    val.to_string()
-                })
-                .collect()
-        }
-        "integer" | "int" => {
-            let prim = child.to_primitive();
-            (0..num_rows)
-                .map(|i| {
-                    let val: i32 = prim.scalar_at(i).as_ref().try_into().unwrap_or(0);
-                    val.to_string()
-                })
-                .collect()
-        }
-        "long" | "bigint" => {
-            let prim = child.to_primitive();
-            (0..num_rows)
-                .map(|i| {
-                    let val: i64 = prim.scalar_at(i).as_ref().try_into().unwrap_or(0);
-                    val.to_string()
-                })
-                .collect()
-        }
-
-        // Floating point types
-        "float" => {
-            let prim = child.to_primitive();
-            (0..num_rows)
-                .map(|i| {
-                    let val: f32 = prim.scalar_at(i).as_ref().try_into().unwrap_or(0.0);
-                    val.to_string()
-                })
-                .collect()
-        }
-        "double" => {
-            let prim = child.to_primitive();
-            (0..num_rows)
-                .map(|i| {
-                    let val: f64 = prim.scalar_at(i).as_ref().try_into().unwrap_or(0.0);
-                    val.to_string()
-                })
-                .collect()
-        }
-
-        // Boolean
-        "boolean" | "bool" => {
-            let bool_arr = child.to_bool();
-            (0..num_rows)
-                .map(|i| {
-                    let val: bool = bool_arr.scalar_at(i).as_ref().try_into().unwrap_or(false);
-                    val.to_string()
-                })
-                .collect()
-        }
-
-        // String and Decimal (both stored as UTF8)
-        "string" | "decimal" => {
-            (0..num_rows)
-                .map(|i| {
-                    let scalar = child.scalar_at(i);
-                    scalar.as_utf8().value().map(|s| s.to_string()).unwrap_or_default()
-                })
-                .collect()
-        }
-
-        // Binary (base64 encode for CSV)
-        "binary" => {
-            (0..num_rows)
-                .map(|i| {
-                    let scalar = child.scalar_at(i);
-                    if let Some(bytes) = scalar.as_binary().value() {
-                        base64_encode(&bytes)
-                    } else {
-                        String::new()
-                    }
-                })
-                .collect()
-        }
-
-        // Date (days since epoch -> YYYY-MM-DD)
-        "date" => {
-            let prim = child.to_primitive();
-            (0..num_rows)
-                .map(|i| {
-                    let days: i32 = prim.scalar_at(i).as_ref().try_into().unwrap_or(0);
-                    days_to_date_string(days)
-                })
-                .collect()
-        }
-
-        // Timestamp (millis since epoch -> ISO format)
-        "timestamp" => {
-            let prim = child.to_primitive();
-            (0..num_rows)
-                .map(|i| {
-                    let millis: i64 = prim.scalar_at(i).as_ref().try_into().unwrap_or(0);
-                    millis_to_timestamp_string(millis)
-                })
-                .collect()
-        }
-
-        // Fallback
-        _ => (0..num_rows).map(|_| String::new()).collect(),
-    }
-}
-
-/// Convert days since epoch to date string (YYYY-MM-DD)
-fn days_to_date_string(days: i32) -> String {
-    use chrono::NaiveDate;
-    let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
-    if let Some(date) = epoch.checked_add_signed(chrono::Duration::days(days as i64)) {
-        date.format("%Y-%m-%d").to_string()
-    } else {
-        "1970-01-01".to_string()
-    }
-}
-
-/// Convert milliseconds since epoch to timestamp string
-fn millis_to_timestamp_string(millis: i64) -> String {
-    use chrono::{TimeZone, Utc};
-    if let Some(dt) = Utc.timestamp_millis_opt(millis).single() {
-        dt.format("%Y-%m-%d %H:%M:%S%.3f").to_string()
-    } else {
-        "1970-01-01 00:00:00.000".to_string()
-    }
-}
-
-/// Simple base64 encode (for binary data in CSV)
-fn base64_encode(bytes: &[u8]) -> String {
-    const ENCODE_TABLE: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-    let mut result = String::with_capacity((bytes.len() + 2) / 3 * 4);
-    let mut i = 0;
-
-    while i + 2 < bytes.len() {
-        let n = ((bytes[i] as u32) << 16) | ((bytes[i + 1] as u32) << 8) | (bytes[i + 2] as u32);
-        result.push(ENCODE_TABLE[((n >> 18) & 0x3F) as usize] as char);
-        result.push(ENCODE_TABLE[((n >> 12) & 0x3F) as usize] as char);
-        result.push(ENCODE_TABLE[((n >> 6) & 0x3F) as usize] as char);
-        result.push(ENCODE_TABLE[(n & 0x3F) as usize] as char);
-        i += 3;
-    }
-
-    if i + 1 == bytes.len() {
-        let n = (bytes[i] as u32) << 16;
-        result.push(ENCODE_TABLE[((n >> 18) & 0x3F) as usize] as char);
-        result.push(ENCODE_TABLE[((n >> 12) & 0x3F) as usize] as char);
-        result.push('=');
-        result.push('=');
-    } else if i + 2 == bytes.len() {
-        let n = ((bytes[i] as u32) << 16) | ((bytes[i + 1] as u32) << 8);
-        result.push(ENCODE_TABLE[((n >> 18) & 0x3F) as usize] as char);
-        result.push(ENCODE_TABLE[((n >> 12) & 0x3F) as usize] as char);
-        result.push(ENCODE_TABLE[((n >> 6) & 0x3F) as usize] as char);
-        result.push('=');
-    }
-
-    result
-}
-
-/// Convert ArrayRef to CSV-formatted rows for JNI compatibility
-///
-/// This is the reverse of build_struct_array - extracts data from Vortex arrays
-/// and converts back to CSV format for JNI layer.
-pub fn array_to_csv_rows(array: &ArrayRef, metadata: &Metadata) -> VortexResult<Vec<String>> {
-    use vortex::ToCanonical;
-
-    let struct_array = array.to_struct();
-    let num_rows = struct_array.len();
-    let mut rows = Vec::with_capacity(num_rows);
-
-    // Extract each column as canonical array for value access
-    let mut column_values: Vec<Vec<String>> = Vec::with_capacity(metadata.fields.len());
-
-    // Get all fields from StructArray
-    let fields = struct_array.fields();
-
-    for (col_idx, field) in metadata.fields.iter().enumerate() {
-        let child = fields.get(col_idx)
-            .ok_or_else(|| format!("Missing field at index {}", col_idx))?;
-
-        let values = extract_column_values(child, &field.data_type, num_rows);
-        column_values.push(values);
-    }
-
-    // Transpose: column-oriented -> row-oriented
-    for row_idx in 0..num_rows {
-        let row: Vec<String> = column_values.iter()
-            .map(|col| col[row_idx].clone())
-            .collect();
-        rows.push(row.join(","));
-    }
-
-    Ok(rows)
-}
-
-/// Read all Vortex files from a directory and return CSV rows
-///
-/// Scans date-partitioned directories (YYYY-MM-DD format) and reads all .vtx files.
-/// Returns data as CSV-formatted strings for JNI compatibility.
-pub fn read_vine_vortex_data(dir_path: &str) -> VortexResult<Vec<String>> {
-    use std::fs;
-    use std::path::PathBuf;
-    use chrono::NaiveDate;
-
-    let base_path = PathBuf::from(dir_path);
-
-    // Load metadata from vine_meta.json
-    let meta_path = base_path.join("vine_meta.json");
-    let metadata = Metadata::load(&meta_path)
-        .map_err(|e| format!("Failed to load metadata: {}", e))?;
-
-    let mut all_rows = Vec::new();
-    let mut directories = Vec::new();
-
-    // Scan for date-partitioned directories
-    let dir_entries = fs::read_dir(&base_path)
-        .map_err(|e| format!("Cannot read directory {:?}: {}", base_path, e))?;
-
-    for entry_result in dir_entries {
-        let entry = entry_result.map_err(|e| format!("Cannot read entry: {}", e))?;
-        let path = entry.path();
-
-        if path.is_dir() {
-            if let Some(dir_name) = path.file_name().and_then(|s| s.to_str()) {
-                if let Ok(date) = NaiveDate::parse_from_str(dir_name, "%Y-%m-%d") {
-                    directories.push((date, path));
-                }
-            }
-        }
-    }
-
-    // Sort directories by date
-    directories.sort_by_key(|(date, _)| *date);
-
-    // Read all Vortex files from date directories
-    for (_, dir_path) in directories {
-        let sub_dir = fs::read_dir(&dir_path)
-            .map_err(|e| format!("Cannot read directory {:?}: {}", dir_path, e))?;
-
-        for file_entry_result in sub_dir {
-            let file_path = file_entry_result
-                .map_err(|e| format!("Cannot read file entry: {}", e))?
-                .path();
-
-            // Process .vtx files only
-            if file_path.extension().map_or(false, |ext| ext == "vtx") {
-                match read_vortex_file(&file_path) {
-                    Ok((_, array)) => {
-                        match array_to_csv_rows(&array, &metadata) {
-                            Ok(rows) => all_rows.extend(rows),
-                            Err(e) => eprintln!("Warning: Failed to convert {:?}: {}", file_path, e),
-                        }
-                    }
-                    Err(e) => eprintln!("Warning: Failed to read {:?}: {}", file_path, e),
-                }
-            }
-        }
-    }
-
-    Ok(all_rows)
-}
-
-/// Write data to Vortex format with date partitioning
-///
-/// Creates date-partitioned directory structure and writes data as .vtx files.
-/// Compatible with existing Vine storage layout.
-pub fn write_vine_vortex_data<P: AsRef<Path>>(
-    base_path: P,
-    rows: &[&str],
-) -> VortexResult<u64> {
-    use std::fs;
-    use chrono::Local;
-
-    let base = base_path.as_ref();
-
-    // Load metadata
-    let meta_path = base.join("vine_meta.json");
-    let metadata = Metadata::load(&meta_path)
-        .map_err(|e| format!("Failed to load metadata: {}", e))?;
-
-    // Create date partition directory
-    let date_str = Local::now().format("%Y-%m-%d").to_string();
-    let partition_dir = base.join(&date_str);
-    fs::create_dir_all(&partition_dir)
-        .map_err(|e| format!("Failed to create partition dir: {}", e))?;
-
-    // Generate filename with microsecond precision
-    let timestamp = Local::now().format("%H%M%S_%f").to_string();
-    let file_path = partition_dir.join(format!("data_{}.vtx", timestamp));
-
-    // Write using existing function
-    write_vortex_file(&file_path, &metadata, rows)
-}
 
 // ============================================================================
-// Helper functions for direct Arrow ↔ Vortex conversion
+// Direct Array Write (used by vine_batch_writer)
 // ============================================================================
-//
-// TODO: Part of direct Arrow ↔ Vortex conversion (currently disabled)
-// See arrow_bridge.rs for status and implementation plan
-//
 
-#[cfg(feature = "direct-vortex-conversion")]
-/// Extract string value from Vortex array at given index
+/// Write Vortex array directly to file
 ///
-/// **TODO: Currently unused - part of direct conversion implementation**
-///
-/// Used by Arrow bridge for direct Vortex → Arrow conversion
-pub fn extract_string_value(array: &ArrayRef, index: usize) -> VortexResult<String> {
-    use vortex::ToCanonical;
-
-    if !array.is_valid(index) {
-        return Ok(String::new());
-    }
-
-    // Convert to canonical VarBin form
-    let canonical = array.to_canonical()
-        .map_err(|e| format!("Failed to convert to canonical: {}", e))?;
-
-    // Try to extract as VarBin (string)
-    if let Ok(varbin) = canonical.as_varbin_view() {
-        if let Some(bytes) = varbin.bytes_at(index) {
-            return String::from_utf8(bytes.into())
-                .map_err(|e| format!("Failed to decode UTF-8: {}", e).into());
-        }
-    }
-
-    Ok(String::new())
-}
-
-#[cfg(feature = "direct-vortex-conversion")]
-/// Extract binary value from Vortex array at given index
-///
-/// **TODO: Currently unused - part of direct conversion implementation**
-///
-/// Used by Arrow bridge for direct Vortex → Arrow conversion
-pub fn extract_binary_value(array: &ArrayRef, index: usize) -> VortexResult<Vec<u8>> {
-    use vortex::ToCanonical;
-
-    if !array.is_valid(index) {
-        return Ok(Vec::new());
-    }
-
-    // Convert to canonical VarBin form
-    let canonical = array.to_canonical()
-        .map_err(|e| format!("Failed to convert to canonical: {}", e))?;
-
-    // Try to extract as VarBin (binary)
-    if let Ok(varbin) = canonical.as_varbin_view() {
-        if let Some(bytes) = varbin.bytes_at(index) {
-            return Ok(bytes.into());
-        }
-    }
-
-    Ok(Vec::new())
-}
-
-#[cfg(feature = "direct-vortex-conversion")]
-/// Write Vortex array directly to file (no CSV conversion)
-///
-/// **TODO: Currently unused - part of direct conversion implementation**
-///
-/// This is used by the direct Arrow → Vortex path.
-/// Accepts a Vortex StructArray and writes it directly to a .vtx file.
 pub fn write_vortex_array<P: AsRef<Path>>(
     file_path: P,
     vortex_array: &ArrayRef,
@@ -926,44 +547,13 @@ pub fn write_vortex_array<P: AsRef<Path>>(
     let session = create_session();
 
     rt.block_on(async {
-        let write_options = session.default_write_options();
-        let file = session.create(file_path.as_ref()).await?;
-        let mut writer = write_options.open(file).await?;
-
-        writer.write_array_columns(vortex_array.clone()).await?;
-
-        let layout_size = writer.finalize().await?;
-        Ok(layout_size)
+        let file = async_fs::File::create(file_path.as_ref()).await?;
+        let write_options = session.write_options();
+        let stream = vortex_array.clone().to_array_stream();
+        let summary = write_options.write(file, stream).await?;
+        Ok(summary.size())
     })
 }
 
-#[cfg(feature = "direct-vortex-conversion")]
-/// Write Vortex array to date-partitioned Vine storage (direct, no CSV)
-///
-/// **TODO: Currently unused - part of direct conversion implementation**
-///
-/// This is the optimized write path that accepts Vortex arrays directly.
-/// Used by Arrow IPC functions for maximum performance.
-pub fn write_vine_vortex_array<P: AsRef<Path>>(
-    base_path: P,
-    vortex_array: &ArrayRef,
-) -> VortexResult<u64> {
-    use std::fs;
-    use chrono::Local;
 
-    let base = base_path.as_ref();
-
-    // Create date partition directory
-    let date_str = Local::now().format("%Y-%m-%d").to_string();
-    let partition_dir = base.join(&date_str);
-    fs::create_dir_all(&partition_dir)
-        .map_err(|e| format!("Failed to create partition dir: {}", e))?;
-
-    // Generate filename with microsecond precision
-    let timestamp = Local::now().format("%H%M%S_%f").to_string();
-    let file_path = partition_dir.join(format!("data_{}.vtx", timestamp));
-
-    // Write directly
-    write_vortex_array(&file_path, vortex_array)
-}
 
