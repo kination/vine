@@ -13,12 +13,13 @@ lazy_static = "1.4"
 base64 = "0.22"
 
 # Apache Arrow for JNI data transfer (Arrow IPC format)
-# Note: Using specific versions to avoid chrono compatibility issues
-arrow-schema = { version = "53.4", default-features = false }
-arrow-array = { version = "53.4", default-features = false }
-arrow-buffer = { version = "53.4", default-features = false }
-arrow-data = { version = "53.4", default-features = false }
-arrow-ipc = { version = "53.4", default-features = false }
+# Must match Vortex v0.56.0's arrow dependency version
+arrow-schema = { version = "56.2", default-features = false }
+arrow-array = { version = "56.2", default-features = false }
+arrow-buffer = { version = "56.2", default-features = false }
+arrow-data = { version = "56.2", default-features = false }
+arrow-ipc = { version = "56.2", default-features = false }
+arrow-cast = { version = "56.2", default-features = false }
 
 # Vortex (primary storage format)
 vortex = { version = "0.56.0", features = ["tokio"] }
@@ -29,7 +30,7 @@ async-fs = { version = "2" }
 
 [dev-dependencies]
 tempfile = "3.8"
-arrow-schema = { version = "53.4", default-features = false }
+arrow-schema = { version = "56.2", default-features = false }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 chrono = "0.4"
 vortex-dtype = { version = "0.56.0" }
@@ -37,3 +38,7 @@ vortex-dtype = { version = "0.56.0" }
 [lib]
 name = "vine_core"
 crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "generate-test-data"
+path = "src/bin/generate_test_data.rs"

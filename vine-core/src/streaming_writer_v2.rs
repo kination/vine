@@ -23,7 +23,7 @@ use vortex::IntoArray;
 
 use crate::global_cache;
 use crate::metadata::Metadata;
-use crate::vortex_exp::{build_struct_array, create_session};
+use crate::vortex_exp::create_session;
 use crate::writer_config::WriterConfig;
 
 /// Summary of a flush operation
@@ -97,29 +97,26 @@ impl StreamingWriterV2 {
         })
     }
 
-    /// Write batch of rows (CSV format)
+    /// Write batch of Vortex array data
     ///
-    /// Convert rows(csv) to Vortex arrays, and accumulated in memory.
-    /// `flush()` to write accumulated chunks to disk.
-    pub fn write_batch(&mut self, rows: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
-        if rows.is_empty() {
+    /// Accepts vortex array directly and accumulates it in memory.
+    /// Call `flush()` to write accumulated chunks to disk.
+    pub fn write_batch(&mut self, array: &ArrayRef) -> Result<(), Box<dyn std::error::Error>> {
+        let num_rows = array.len();
+        if num_rows == 0 {
             return Ok(());
         }
 
         // Check if adding current rows would exceed limit
-        if self.current_buffer_rows + rows.len() > self.config.max_rows_per_file
+        if self.current_buffer_rows + num_rows > self.config.max_rows_per_file
             && !self.chunk_buffer.is_empty()
         {
             // Flush before exceeding
             self.flush()?;
         }
 
-        // Convert 'csv' rows to 'Vortex array'
-        let array = build_struct_array(&self.metadata, rows)
-            .map_err(|e| -> Box<dyn std::error::Error> { e })?;
-
-        self.current_buffer_rows += rows.len();
-        self.chunk_buffer.push(array);
+        self.current_buffer_rows += num_rows;
+        self.chunk_buffer.push(array.clone());
 
         Ok(())
     }
