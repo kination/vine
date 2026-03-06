@@ -7,7 +7,6 @@ use std::sync::Arc;
 
 #[test]
 fn test_arrow_ipc_serialization_roundtrip() {
-    // Create a simple RecordBatch directly without CSV conversion
     let schema = Schema::new(vec![
         Field::new("id", DataType::Int32, false),
         Field::new("name", DataType::Utf8, true),
