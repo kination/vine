@@ -1,6 +1,7 @@
 use vine_core::streaming_writer_v2::StreamingWriterV2;
 use vine_core::writer_config::WriterConfig;
 use vine_core::metadata::{Metadata, MetadataField};
+use vine_core::vortex_exp::build_struct_array;
 use tempfile::tempdir;
 use chrono::Local;
 
@@ -24,6 +25,11 @@ fn create_test_metadata() -> Metadata {
     )
 }
 
+/// Helper: build VortexArrayRef from comma-separated rows
+fn build_test_array(metadata: &Metadata, rows: &[&str]) -> vortex::ArrayRef {
+    build_struct_array(metadata, rows).expect("Failed to build test array")
+}
+
 #[test]
 fn test_streaming_writer_v2_basic() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
@@ -37,15 +43,17 @@ fn test_streaming_writer_v2_basic() {
         .expect("Failed to create writer");
 
     // Write and accumulate
-    writer.write_batch(&["1,Alice", "2,Bob"]).expect("Write failed");
+    let array1 = build_test_array(&metadata, &["1,Alice", "2,Bob"]);
+    writer.write_batch(&array1).expect("Write failed");
     assert_eq!(writer.buffered_rows(), 2);
     assert_eq!(writer.buffered_chunks(), 1);
 
-    writer.write_batch(&["3,Charlie"]).expect("Write failed");
+    let array2 = build_test_array(&metadata, &["3,Charlie"]);
+    writer.write_batch(&array2).expect("Write failed");
     assert_eq!(writer.buffered_rows(), 3);
     assert_eq!(writer.buffered_chunks(), 2);
 
-    // Flush - should write to file and return summary
+    // Flush
     let summary = writer.flush().expect("Flush failed");
     assert!(summary.is_some(), "Should return flush summary");
     let summary = summary.unwrap();
@@ -59,7 +67,8 @@ fn test_streaming_writer_v2_basic() {
     assert!(writer.bytes_written() > 0);
 
     // Write more (new file)
-    writer.write_batch(&["4,Diana"]).expect("Write failed");
+    let array3 = build_test_array(&metadata, &["4,Diana"]);
+    writer.write_batch(&array3).expect("Write failed");
     writer.close().expect("Close failed");
 
     // Verify files
@@ -85,19 +94,18 @@ fn test_auto_flush() {
     let metadata = create_test_metadata();
     metadata.save(meta_path.to_str().unwrap()).expect("Failed to save metadata");
 
-    // Create writer with small max_rows_per_file
     let mut config = WriterConfig::default();
     config.max_rows_per_file = 5;
 
     let mut writer = StreamingWriterV2::with_config(path.to_path_buf(), config)
         .expect("Failed to create writer");
 
-    // Write 3 rows (no flush yet)
-    writer.write_batch(&["1,A", "2,B", "3,C"]).expect("Write failed");
+    let array1 = build_test_array(&metadata, &["1,A", "2,B", "3,C"]);
+    writer.write_batch(&array1).expect("Write failed");
     assert_eq!(writer.buffered_rows(), 3);
 
-    // Write 3 more rows (3+3 > 5, so flushes first 3 data, then add 3)
-    writer.write_batch(&["4,D", "5,E", "6,F"]).expect("Write failed");
+    let array2 = build_test_array(&metadata, &["4,D", "5,E", "6,F"]);
+    writer.write_batch(&array2).expect("Write failed");
     assert_eq!(writer.buffered_rows(), 3);
 
     writer.close().expect("Close failed");
@@ -115,7 +123,6 @@ fn test_empty_flush() {
     let mut writer = StreamingWriterV2::new(path.to_path_buf())
         .expect("Failed to create writer");
 
-    // Flush without writing should return None
     let summary = writer.flush().expect("Flush should succeed");
     assert!(summary.is_none(), "Empty flush should return None");
     assert_eq!(writer.bytes_written(), 0);
